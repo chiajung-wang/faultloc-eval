@@ -11,6 +11,7 @@ import pytest
 
 from faultloc.dataset.filters import (
     DropReason,
+    FilterResult,
     filter_ground_truth_files,
     is_source_file,
 )
@@ -56,7 +57,6 @@ class TestIsSourceFile:
     def test_docs_and_config_are_not_source(self, path: str) -> None:
         assert is_source_file(path) is False
 
-
     @pytest.mark.parametrize(
         "path",
         [
@@ -92,6 +92,7 @@ class TestIsSourceFile:
     ) -> None:
         """Paths arrive from diff headers and may carry a `./` prefix."""
         assert is_source_file(path) is expected
+
 
 class TestFilterGroundTruthFiles:
     def test_keeps_source_files_and_drops_the_rest(self) -> None:
@@ -140,3 +141,43 @@ class TestFilterGroundTruthFiles:
         result = filter_ground_truth_files([])
         assert not result.kept
         assert result.drop_reason == DropReason.NO_SOURCE_FILES
+
+    def test_duplicate_paths_count_once_against_the_cap(self) -> None:
+        """The cap counts distinct files, not diff entries.
+
+        ADR-0001 drops an instance when a fix spans more than three source
+        files. A path repeated in the input is still one location, so it must
+        not push an otherwise-valid instance over the cap.
+        """
+        result = filter_ground_truth_files(["a.py", "a.py", "b.py", "c.py"])
+        assert result.kept
+        assert result.files == ("a.py", "b.py", "c.py")
+
+    def test_duplicates_are_deduplicated_by_first_occurrence(self) -> None:
+        result = filter_ground_truth_files(["b.py", "a.py", "b.py"])
+        assert result.files == ("b.py", "a.py")
+
+
+class TestFilterResultInvariant:
+    """`files` and `drop_reason` are mutually exclusive and jointly exhaustive.
+
+    Every consumer branches on one or the other. A result with both set, or
+    neither, would make `kept` disagree with `drop_reason` and let a dropped
+    instance be scored as if it had been kept.
+    """
+
+    def test_kept_result_carries_no_drop_reason(self) -> None:
+        result = FilterResult(files=("a.py",), drop_reason=None)
+        assert result.kept
+
+    def test_dropped_result_carries_no_files(self) -> None:
+        result = FilterResult(files=None, drop_reason=DropReason.NO_SOURCE_FILES)
+        assert not result.kept
+
+    def test_both_set_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            FilterResult(files=("a.py",), drop_reason=DropReason.NO_SOURCE_FILES)
+
+    def test_neither_set_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            FilterResult(files=None, drop_reason=None)

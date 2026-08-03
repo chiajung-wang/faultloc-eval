@@ -60,6 +60,13 @@ class FilterResult:
     files: tuple[str, ...] | None
     drop_reason: str | None
 
+    def __post_init__(self) -> None:
+        if (self.files is None) == (self.drop_reason is None):
+            raise ValueError(
+                "exactly one of files / drop_reason must be set, "
+                f"got files={self.files!r} drop_reason={self.drop_reason!r}"
+            )
+
     @property
     def kept(self) -> bool:
         return self.files is not None
@@ -106,9 +113,14 @@ def filter_ground_truth_files(
     ``max_source_files`` remain -- such a PR is a refactor, and "where is the
     bug" has no single answer for it.
 
+    Duplicate paths collapse to their first occurrence: the cap counts distinct
+    source files, and one file listed twice is still one location.
+
     Returned file order matches input order, so results are deterministic.
     """
-    source_files = tuple(path for path in changed_files if is_source_file(path))
+    source_files = tuple(
+        dict.fromkeys(path for path in changed_files if is_source_file(path))
+    )
 
     if not source_files:
         return FilterResult(files=None, drop_reason=DropReason.NO_SOURCE_FILES)
