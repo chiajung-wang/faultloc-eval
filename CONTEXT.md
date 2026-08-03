@@ -12,13 +12,13 @@ Sourced from either the **Verified Set** or the **Fresh Set**.
 
 ## Verified Set
 
-SWE-bench Verified — 500 human-validated instances. Used because published localization numbers exist against it, so results are anchored rather than free-floating.
+SWE-bench Verified — 500 human-validated instances across 12 Python repos. Used because published localization numbers exist against it, so results are anchored rather than free-floating.
 
-Its instances predate current model training cutoffs, so it is **contaminated** by construction.
+Pinned to `princeton-nlp/SWE-bench_Verified`, split `test`, revision `c104f840cc67f8b6eec6f759ebc8b2693d585d4a`. Its newest instance dates to 2023-08-07, so it predates current model training cutoffs and is **contaminated** by construction. 231 of the 500 instances are from `django/django`, so results are reported per repo as well as in aggregate. See ADR-0006.
 
 ## Fresh Set
 
-Self-mined instances whose issues were closed *after* the evaluated model's training cutoff. Serves as the contamination control. Target size 150–300.
+Self-mined instances whose issues were closed *after* the evaluated model's training cutoff. Serves as the contamination control. Target size 150–300, drawn from the Verified Set's repositories where possible so a measured gap reflects contamination rather than repo difficulty. See ADR-0006.
 
 ## Contamination
 
