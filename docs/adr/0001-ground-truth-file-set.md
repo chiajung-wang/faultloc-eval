@@ -33,6 +33,31 @@ Three is chosen to match how curated fault-localization benchmarks constrain ins
 
 **Comparability limit:** published numbers from other work used different subsets. They may be cited only alongside an explicit statement that the instance sets differ.
 
+## Measured consequences (2026-08-03, Verified Set)
+
+Filter run over all 500 gold patches once the implementation existed:
+
+| Outcome | Count | Share |
+|---|---|---|
+| kept | 490 | 98.0% |
+| dropped — `too_many_source_files` | 10 | 2.0% |
+| dropped — `no_source_files` | 0 | 0.0% |
+
+Ground-Truth File Set sizes among the kept: **431 one-file, 47 two-file, 12 three-file**. Top-1 is therefore a well-posed question for 88% of the benchmark, which is what makes it a defensible headline metric rather than an arbitrary one.
+
+Per-repo keep rate is 95–100% everywhere except `pylint-dev/pylint` at 8/10. The filter is not quietly reshaping the repo distribution.
+
+**The test-stripping rule is close to a no-op on this dataset, and the report must say so.** Across all 500 patches exactly two files were classified non-source:
+
+```
+pylint-dev__pylint-4661:            setup.cfg
+scikit-learn__scikit-learn-12682:   examples/decomposition/plot_sparse_coding.py
+```
+
+Zero test files, because SWE-bench separates `patch` from `test_patch` at dataset construction — the tests were never in the field being filtered. So **100% of the published 2.0% Filter Rate comes from the >3-file cap**, and describing the filter as "strips tests, docs, and config" alongside that number would credit rules that did no work here.
+
+The rule is still correct and still required: Fresh Set instances (M6) are mined from raw PRs, which are *not* pre-split, and there test-stripping does the heavy lifting. The two catches above confirm the doc/config rules fire correctly on real paths, just rarely.
+
 ## Alternatives rejected
 
 - **All PR files** — the system would be penalised for failing to predict `CHANGELOG.md`
