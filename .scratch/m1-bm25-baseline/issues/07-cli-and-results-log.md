@@ -1,6 +1,6 @@
 # 07 — Wire the CLI and open the results log
 
-Status: ready-for-agent
+Status: done
 
 ## Context
 
@@ -55,3 +55,38 @@ Why each field earns its place:
 ## Notes
 
 The results-log format set here is permanent. Design it so a later reader can tell exactly which code produced which number.
+
+## Comments
+
+**Closed 2026-08-03.** M1 is complete. The first entry in `RESULTS.md` was emitted by `faultloc evaluate --rung bm25 --split dev` at code `70b01bb`.
+
+```
+bm25 · dev · n=244
+  Top-1       39.3%   (95% CI 33.4%-45.6%)
+  Recall@3    59.3%
+  Recall@5    68.5%
+  Wall clock  1m 23s
+  Cost        $0.00
+  Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+  Stops: answered 244
+```
+
+### The dirty-tree marker changed the order of work
+
+`code_version` suffixes the SHA with `-dirty` when the working tree has uncommitted edits, and the entry carries a blockquote warning rather than a footnote. The first full run was made before the CLI itself was committed, and the warning fired correctly — so the run was repeated with `--no-write`, the code committed, and only then was the real entry generated. A number produced from a modified tree cannot be reproduced from any commit, and an entry that hides that is worse than one with no provenance at all because it looks trustworthy.
+
+`code_version` returns `"unknown"` outside a repository rather than raising or inventing a value. Missing provenance is stated.
+
+### Decisions
+
+**`--limit` refuses to write an entry.** A truncated run is scored on a different instance set; admitting it to a log whose entire purpose is comparability would poison it.
+
+**Entries are prepended, not appended**, so a reader meets the current number rather than the archaeology. Tested that repeated writes never lose an entry and never duplicate the header.
+
+**The `Read` line defaults to `_(not recorded)_`** — visibly unfilled, so an entry lacking human interpretation does not read as finished.
+
+### Two bugs found while wiring
+
+**The rung was constructed inside the prediction loop.** A fresh `Bm25Rung` per instance discarded the blob-keyed token cache and the 21× content reuse behind it: 1.3s per instance against the 0.29s median measured in issue 05, which over the full dev split is roughly half an hour instead of eighty seconds. Hoisting it out of the loop was one line.
+
+**A test that could not fail.** `assert code_version(tmp_path) in {"unknown", ""} or True` — the trailing `or True` made it vacuous. It was replaced with a real assertion that a non-repository directory reports `"unknown"`. A test that cannot fail is worse than no test: it occupies the slot where a real one would go, and reads as coverage.
