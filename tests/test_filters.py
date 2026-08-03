@@ -57,6 +57,42 @@ class TestIsSourceFile:
         assert is_source_file(path) is False
 
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "pandas/_libs/tslib.pyx",
+            "numpy/core/src/multiarray/item_selection.c",
+            "src/multiarray/nditer.h",
+            "sphinx/themes/basic/static/searchtools.js",
+            "django/db/models/query.pyi",
+        ],
+    )
+    def test_non_python_code_is_source(self, path: str) -> None:
+        """The classifier is a deny-list, and that is load-bearing.
+
+        Swapping to an allow-list of known code extensions would pass every
+        other test in this file while silently emptying the Ground-Truth File
+        Set for any fix that touches compiled or front-end sources. A dropped
+        ground-truth file is indistinguishable from a wrong prediction once it
+        reaches the scorer, so the deny-list is pinned here rather than left to
+        a comment.
+        """
+        assert is_source_file(path) is True
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("./django/db/models/query.py", True),
+            ("./tests/test_query.py", False),
+            ("./docs/usage.rst", False),
+        ],
+    )
+    def test_leading_dot_slash_does_not_change_the_verdict(
+        self, path: str, expected: bool
+    ) -> None:
+        """Paths arrive from diff headers and may carry a `./` prefix."""
+        assert is_source_file(path) is expected
+
 class TestFilterGroundTruthFiles:
     def test_keeps_source_files_and_drops_the_rest(self) -> None:
         result = filter_ground_truth_files(
