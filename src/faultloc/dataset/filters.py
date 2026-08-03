@@ -118,9 +118,7 @@ def filter_ground_truth_files(
 
     Returned file order matches input order, so results are deterministic.
     """
-    source_files = tuple(
-        dict.fromkeys(path for path in changed_files if is_source_file(path))
-    )
+    source_files = tuple(dict.fromkeys(path for path in changed_files if is_source_file(path)))
 
     if not source_files:
         return FilterResult(files=None, drop_reason=DropReason.NO_SOURCE_FILES)

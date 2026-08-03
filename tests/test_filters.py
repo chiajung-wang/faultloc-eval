@@ -87,9 +87,7 @@ class TestIsSourceFile:
             ("./docs/usage.rst", False),
         ],
     )
-    def test_leading_dot_slash_does_not_change_the_verdict(
-        self, path: str, expected: bool
-    ) -> None:
+    def test_leading_dot_slash_does_not_change_the_verdict(self, path: str, expected: bool) -> None:
         """Paths arrive from diff headers and may carry a `./` prefix."""
         assert is_source_file(path) is expected
 
@@ -109,9 +107,7 @@ class TestFilterGroundTruthFiles:
         assert result.drop_reason is None
 
     def test_preserves_input_order(self) -> None:
-        result = filter_ground_truth_files(
-            ["b/second.py", "tests/test_x.py", "a/first.py"]
-        )
+        result = filter_ground_truth_files(["b/second.py", "tests/test_x.py", "a/first.py"])
         assert result.files == ("b/second.py", "a/first.py")
 
     def test_drops_instance_with_no_source_files(self) -> None:
