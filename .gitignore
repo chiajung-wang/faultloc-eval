@@ -17,6 +17,7 @@ htmlcov/
 # Data — large, regenerable, or licence-encumbered
 data/repos/
 data/index/
+data/cache/
 *.sqlite
 *.db
 

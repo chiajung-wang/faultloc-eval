@@ -6,7 +6,7 @@ Fault localization built as a *measured ladder* — lexical retrieval, dense ret
 
 The system is half the deliverable. The other half is the evidence: a reproducible benchmark, a published filter rate, a contamination control, and a calibrated confidence model that lets the system abstain rather than guess.
 
-> **Status: scaffolding.** No results yet. First number lands with M1.
+> **Status: M1 complete.** Rung 1 (BM25) scores **39.3% Top-1** on the dev split. Rungs 2–4 next.
 
 ## Why localization and not patch generation
 
@@ -16,14 +16,20 @@ Localization is the earlier question, and the one triage actually blocks on: *wh
 
 ## Results
 
+Dev split, 244 instances. Test set untouched until M7.
+
 | Rung | Top-1 | Recall@3 | Recall@5 | Cost/instance | Latency |
 |---|---|---|---|---|---|
-| BM25 | — | — | — | $0.00 | — |
+| BM25 | **39.3%** (95% CI 33.4–45.6) | 59.3% | 68.5% | $0.00 | 0.3s |
 | Embedding retrieval | — | — | — | — | — |
 | LLM rerank | — | — | — | — | — |
 | Agent | — | — | — | — | — |
 
-Every number here will be traceable to a dataset, split, commit, and date in `RESULTS.md`.
+Every number here traces to a dataset, split, commit, and date in [`RESULTS.md`](RESULTS.md), which is written by the run itself rather than by hand.
+
+Top-1 carries a 95% Wilson interval because at this sample size a few points between two rungs is not yet a result. The intervals already earn their place in the per-repo breakdown: `sphinx-doc/sphinx` at 4.5% (0.8–21.8) and `scikit-learn` at 81.2% (57.0–93.4) do not overlap, so that gap is real, while `django` at 38.9% and `sympy` at 36.1% overlap almost entirely and their difference is not.
+
+Sphinx is the sharpest open question. Its reports describe *rendered output* in vocabulary that never appears in the code producing it — precisely the gap lexical matching cannot cross, and the clearest test of whether rung 2 earns its cost.
 
 ## Design
 

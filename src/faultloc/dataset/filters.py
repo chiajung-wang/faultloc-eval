@@ -60,9 +60,26 @@ class FilterResult:
     files: tuple[str, ...] | None
     drop_reason: str | None
 
+    def __post_init__(self) -> None:
+        if (self.files is None) == (self.drop_reason is None):
+            raise ValueError(
+                "exactly one of files / drop_reason must be set, "
+                f"got files={self.files!r} drop_reason={self.drop_reason!r}"
+            )
+
     @property
     def kept(self) -> bool:
         return self.files is not None
+
+
+def _is_test_file(path: str) -> bool:
+    """True if ``path`` is test code, by directory or by filename."""
+    segments = path.split("/")
+    if any(f"{segment}/" in TEST_MARKERS for segment in segments[:-1]):
+        return True
+
+    filename = segments[-1]
+    return filename.startswith(TEST_FILE_PREFIX) or filename.endswith(TEST_FILE_SUFFIX)
 
 
 def is_source_file(path: str) -> bool:
@@ -70,8 +87,20 @@ def is_source_file(path: str) -> bool:
 
     Excludes test files, documentation, and configuration. See ADR-0001 for why
     test files are treated as a consequence of a fix rather than its location.
+
+    Deliberately a deny-list: anything not recognised as test, doc, or config is
+    source. An allow-list of known code extensions would silently drop the
+    ``.pyx``, ``.c``, and ``.js`` files that real fixes touch, and a dropped
+    ground-truth file is indistinguishable from a wrong prediction downstream.
     """
-    raise NotImplementedError
+    if _is_test_file(path):
+        return False
+
+    segments = path.split("/")
+    if any(f"{segment}/" in NON_SOURCE_DIRS for segment in segments[:-1]):
+        return False
+
+    return not path.endswith(NON_SOURCE_SUFFIXES)
 
 
 def filter_ground_truth_files(
@@ -84,6 +113,17 @@ def filter_ground_truth_files(
     ``max_source_files`` remain -- such a PR is a refactor, and "where is the
     bug" has no single answer for it.
 
+    Duplicate paths collapse to their first occurrence: the cap counts distinct
+    source files, and one file listed twice is still one location.
+
     Returned file order matches input order, so results are deterministic.
     """
-    raise NotImplementedError
+    source_files = tuple(dict.fromkeys(path for path in changed_files if is_source_file(path)))
+
+    if not source_files:
+        return FilterResult(files=None, drop_reason=DropReason.NO_SOURCE_FILES)
+
+    if len(source_files) > max_source_files:
+        return FilterResult(files=None, drop_reason=DropReason.TOO_MANY_SOURCE_FILES)
+
+    return FilterResult(files=source_files, drop_reason=None)

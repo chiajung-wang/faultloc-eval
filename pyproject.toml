@@ -34,6 +34,17 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+# Docstrings in this repo carry the reasoning behind decisions and sometimes
+# include code; format it like real code rather than letting it drift.
+docstring-code-format = true
+# Keep the magic trailing comma meaningful: a collection written across lines
+# with a trailing comma stays expanded. Test parameter lists read better that
+# way, and diffs stay one-item-per-line.
+skip-magic-trailing-comma = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
