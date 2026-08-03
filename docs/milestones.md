@@ -8,7 +8,7 @@ Deliberate: the predecessor project to this one planned seven milestones in deta
 |---|---|---|
 | **M1** | **BM25 baseline, end to end** | A real Top-1 number on the Verified Set, printed by a CLI command |
 | M2 | Instance Filter hardened + filter rate published | Drop reasons counted and reported; filter is unit-tested |
-| M3 | Embedding retrieval over AST Chunks (rung 2) | Rung-2 delta over rung 1 reported at cost and latency |
+| M3 | Embedding retrieval over AST Chunks (rung 2) | Rung-2 delta over rung 1 reported at cost and latency, **with the BM25-over-chunks ablation that separates the two variables** |
 | M4 | LLM rerank (rung 3) | Rung-3 delta reported; cross-model comparison table |
 | M5 | Tool-using agent (rung 4) | Five read-only tools, stop conditions, path guardrail, budget caps |
 | M6 | Fresh Set mining | 150–300 post-cutoff instances, frozen, contamination gap measured |
@@ -17,3 +17,5 @@ Deliberate: the predecessor project to this one planned seven milestones in deta
 | M9 | Deploy + CI gate | Container live on a public URL; GH Actions posts Top-1 delta per PR |
 
 Dependencies to note: M6 can run in parallel with M3–M5 (independent data work). M7 requires M5. M9 requires M8.
+
+Carried into M3 so it is not forgotten: rung 2 changes **two** things at once — word matching → embeddings, and whole files → chunks. A rung-2 win is therefore unattributable on its own. Running BM25 over the same chunks isolates the two. It is one extra row in the results table and needs no new infrastructure, so there is no excuse for skipping it.
