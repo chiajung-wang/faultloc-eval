@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.local
+
+# Data — large, regenerable, or licence-encumbered
+data/repos/
+data/index/
+*.sqlite
+*.db
+
+# OS
+.DS_Store
+
+# Session handoff  not for a public repo
+HANDOFF.md
