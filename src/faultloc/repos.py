@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -144,6 +145,47 @@ class RepoStore:
         if result.returncode != 0:
             raise CommitUnavailableError(f"blob {blob} not found in {repo}")
         return result.stdout.decode("utf-8", errors="replace")
+
+    def read_blobs(self, repo: str, blobs: Sequence[str]) -> dict[str, str]:
+        """Read many blobs in one `git cat-file --batch` process.
+
+        A subprocess per file would be about 900,000 spawns across the Verified
+        Set, which dominates everything else the rung does. One process reading
+        a stream of hashes turns that into one spawn per instance.
+
+        Missing hashes are omitted from the result rather than raising: a caller
+        asking for a batch wants the batch, and can compare keys if it cares.
+        """
+        if not blobs:
+            return {}
+
+        result = subprocess.run(
+            ["git", "-C", str(self._require_clone(repo)), "cat-file", "--batch"],
+            input="\n".join(blobs).encode(),
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise CommitUnavailableError(f"batch read failed for {repo}")
+
+        contents: dict[str, str] = {}
+        buffer = result.stdout
+        offset = 0
+        while offset < len(buffer):
+            newline = buffer.find(b"\n", offset)
+            if newline == -1:
+                break
+            header = buffer[offset:newline].split()
+            offset = newline + 1
+            if len(header) != LS_TREE_FIELDS:  # "<sha> missing" is two fields
+                continue
+            sha, _kind, size = header
+            length = int(size)
+            contents[sha.decode()] = buffer[offset : offset + length].decode(
+                "utf-8", errors="replace"
+            )
+            offset += length + 1  # git appends a newline after each payload
+        return contents
 
     def read_file(self, repo: str, commit: str, path: str) -> str:
         result = subprocess.run(
