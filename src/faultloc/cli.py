@@ -35,6 +35,7 @@ from faultloc.repos import RepoStore
 from faultloc.rungs import Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
+from faultloc.rungs.embed import EmbedRung
 from faultloc.scoring import score
 
 app = typer.Typer(
@@ -47,6 +48,7 @@ RUNGS: dict[str, Callable[[], Rung]] = {
     "bm25": Bm25Rung,
     "bm25-chunks": Bm25ChunksRung,
     "bm25-chunks-bodies": partial(Bm25ChunksRung, include_bodies=True),
+    "embed": EmbedRung,
 }
 DEFAULT_RESULTS = Path("RESULTS.md")
 
