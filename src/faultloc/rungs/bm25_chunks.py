@@ -27,12 +27,24 @@ from faultloc.rungs.tokenize import tokenize, tokenize_path
 
 
 class Bm25ChunksRung:
-    """Lexical retrieval over chunks, aggregated back to files."""
+    """Lexical retrieval over chunks, aggregated back to files.
 
-    name = "bm25-chunks"
+    `include_bodies` is the second ablation (issue 06). Issue 01 measured
+    chunking costing ~9pp of Recall@5 and could not say which half did it,
+    because "chunking" changed two things at once: the index unit shrank to a
+    definition, *and* the body stopped being indexed. This flag moves only the
+    second, so the two are finally separable.
+    """
 
-    def __init__(self, store: RepoStore | None = None) -> None:
+    def __init__(
+        self,
+        store: RepoStore | None = None,
+        *,
+        include_bodies: bool = False,
+    ) -> None:
         self.store = store or RepoStore()
+        self.include_bodies = include_bodies
+        self.name = "bm25-chunks-bodies" if include_bodies else "bm25-chunks"
         # Chunk tokens keyed by blob SHA, the same content hash rung 1 keys its
         # token cache on. Parsing is markedly more expensive than tokenising, so
         # the ~21x content reuse across the Verified Set matters more here.
@@ -83,7 +95,8 @@ class Bm25ChunksRung:
         wanted = [f.blob for f in files if f.blob not in self._chunks_by_blob]
         if wanted:
             for blob, text in self.store.read_blobs(repo, wanted).items():
-                self._chunks_by_blob[blob] = [tokenize(c.text) for c in chunk_source(text)]
+                chunks = chunk_source(text, include_bodies=self.include_bodies)
+                self._chunks_by_blob[blob] = [tokenize(c.text) for c in chunks]
 
         documents: list[tuple[str, list[str]]] = []
         for file in files:
@@ -92,8 +105,8 @@ class Bm25ChunksRung:
                 documents.append((file.path, path_tokens + chunk_tokens))
         return documents
 
-    @staticmethod
     def _prediction(
+        self,
         instance: Instance,
         paths: tuple[str, ...],
         stop_condition: str,
@@ -101,7 +114,7 @@ class Bm25ChunksRung:
     ) -> Prediction:
         return Prediction(
             instance_id=instance.instance_id,
-            rung="bm25-chunks",
+            rung=self.name,
             ranked_files=paths,
             stop_condition=stop_condition,
             latency_s=time.perf_counter() - started,

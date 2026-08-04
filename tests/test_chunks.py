@@ -9,7 +9,7 @@ moving a number.
 
 from __future__ import annotations
 
-from faultloc.rungs.chunks import Chunk, aggregate_by_file, chunk_source
+from faultloc.rungs.chunks import WINDOW_CHARS, Chunk, aggregate_by_file, chunk_source
 
 
 def names(source: str) -> list[str]:
@@ -48,9 +48,10 @@ class TestExtraction:
         (chunk,) = chunk_source('def rotate():\n    """Turn a label sideways."""\n')
         assert "Turn a label sideways." in chunk.text
 
-    def test_body_is_not_indexed(self) -> None:
-        """Bodies are mechanical and near-identical across a codebase; indexing
-        them would swamp the docstring, which is the only prose in the file."""
+    def test_body_is_not_indexed_by_default(self) -> None:
+        """The original design: bodies were expected to swamp the docstring,
+        which is the only prose in the file. Issue 01 measured that costing
+        ~9pp of Recall@5, so it is now a flag rather than an assumption."""
         (chunk,) = chunk_source("def rotate():\n    unmistakable_body_token = 1\n")
         assert "unmistakable_body_token" not in chunk.text
 
@@ -100,6 +101,85 @@ class TestNoFileIsInvisible:
         """
         (chunk,) = chunk_source("def f():\n    data = '\x00'\n")
         assert chunk.kind == "file"
+
+
+class TestIncludeBodies:
+    def test_body_is_indexed_when_asked(self) -> None:
+        (chunk,) = chunk_source(
+            "def rotate():\n    unmistakable_body_token = 1\n", include_bodies=True
+        )
+        assert "unmistakable_body_token" in chunk.text
+
+    def test_a_class_does_not_carry_its_methods_text(self) -> None:
+        """Methods are chunks in their own right. A class carrying them would
+        index the same text at every level of nesting, inflating the corpus and
+        making the class match anything any of its methods matches."""
+        source = (
+            "class Widget:\n"
+            '    """A widget."""\n'
+            "    registry = {}\n"
+            "    def rotate(self):\n"
+            "        method_only_token = 1\n"
+        )
+        widget, rotate = chunk_source(source, include_bodies=True)
+
+        assert "registry" in widget.text
+        assert "method_only_token" not in widget.text
+        assert "method_only_token" in rotate.text
+
+    def test_module_level_code_is_still_unindexed(self) -> None:
+        """A cost of chunking that bodies do not fix: a file with definitions
+        never indexes the statements outside them."""
+        source = "MODULE_LEVEL_TOKEN = 1\n\n\ndef rotate():\n    pass\n"
+        (chunk,) = chunk_source(source, include_bodies=True)
+        assert "MODULE_LEVEL_TOKEN" not in chunk.text
+
+    def test_the_fallback_is_unaffected(self) -> None:
+        """A file with no definitions already carries its whole text."""
+        source = "SHARED = 1\n"
+        assert chunk_source(source)[0].text == chunk_source(source, include_bodies=True)[0].text
+
+
+class TestWindowing:
+    def test_short_chunks_are_left_alone(self) -> None:
+        assert len(chunk_source("def f():\n    pass\n")) == 1
+
+    def test_long_chunks_are_split_not_truncated(self) -> None:
+        """The failure this exists to prevent: an embedding model with a
+        512-token limit silently discards everything past it, and 1.6% of
+        chunks carry 55% of the corpus."""
+        source = "".join(f"CONSTANT_{i} = {i}\n" for i in range(400))
+        chunks = chunk_source(source)
+
+        assert len(chunks) > 1
+        rejoined = "".join(c.text for c in chunks)
+        assert "CONSTANT_0" in rejoined
+        assert "CONSTANT_399" in rejoined
+
+    def test_no_window_exceeds_the_budget(self) -> None:
+        source = "".join(f"CONSTANT_{i} = {i}\n" for i in range(400))
+        assert all(len(c.text) <= WINDOW_CHARS for c in chunk_source(source))
+
+    def test_windows_do_not_repeat_the_signature(self) -> None:
+        """Signature and docstring are inside the split text already; carrying
+        them on every window would index them once per window."""
+        body = "".join(f"    value_{i} = {i}\n" for i in range(400))
+        chunks = chunk_source(f"def rotate():\n{body}", include_bodies=True)
+
+        assert len(chunks) > 1
+        assert sum(1 for c in chunks if "def rotate" in c.text) == 1
+
+    def test_a_single_over_long_line_is_hard_split(self) -> None:
+        """Minified and generated files exist. One unbounded chunk would be
+        exactly the document shape windowing is here to prevent."""
+        chunks = chunk_source("X = '" + "a" * (WINDOW_CHARS * 3) + "'\n")
+
+        assert len(chunks) > 1
+        assert all(len(c.text) <= WINDOW_CHARS for c in chunks)
+
+    def test_windows_are_deterministic(self) -> None:
+        source = "".join(f"CONSTANT_{i} = {i}\n" for i in range(400))
+        assert [c.text for c in chunk_source(source)] == [c.text for c in chunk_source(source)]
 
 
 class TestAggregation:

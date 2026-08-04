@@ -7,6 +7,8 @@ results. Logic lives in the package, so it stays testable without a subprocess.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -23,6 +25,7 @@ from faultloc.reporting import (
     render_terminal,
     today,
 )
+from faultloc.rungs import Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
 from faultloc.scoring import score
@@ -33,7 +36,11 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-RUNGS = {"bm25": Bm25Rung, "bm25-chunks": Bm25ChunksRung}
+RUNGS: dict[str, Callable[[], Rung]] = {
+    "bm25": Bm25Rung,
+    "bm25-chunks": Bm25ChunksRung,
+    "bm25-chunks-bodies": partial(Bm25ChunksRung, include_bodies=True),
+}
 DEFAULT_RESULTS = Path("RESULTS.md")
 
 
@@ -46,7 +53,10 @@ def version() -> None:
 @app.command()
 def evaluate(
     rung: Annotated[
-        str, typer.Option(help="Which rung: bm25 | bm25-chunks | embed | rerank | agent")
+        str,
+        typer.Option(
+            help="Which rung: bm25 | bm25-chunks | bm25-chunks-bodies | embed | rerank | agent"
+        ),
     ] = "bm25",
     split: Annotated[str, typer.Option(help="Dataset split: dev | test")] = "dev",
     limit: Annotated[int, typer.Option(help="Evaluate only the first N instances; 0 = all.")] = 0,
