@@ -53,9 +53,19 @@ A rung's value is the delta it adds over the rung below, at its cost and latency
 
 ## AST Chunk
 
-The indexed unit at rung 2: one function or class, embedded as its signature, docstring, and file path. Chosen because docstrings carry natural language, partially bridging the gap between prose issue text and code.
+The indexed unit at rung 2: one function or class, embedded as its signature, docstring, **body**, and file path.
 
-A file that yields no definitions — unparseable, non-Python, or simply a module of constants — falls back to a single whole-file chunk. A file with no chunks would be absent from the candidate set entirely, which caps accuracy in a way indistinguishable from weak ranking.
+The body was originally excluded, on the theory that mechanical code would swamp the docstring — the one place in source code where a human wrote English about intent. Measured, that cost 8.3pp of Recall@3: bug reports quote body tokens constantly, and a token that was never indexed cannot be retrieved by any similarity function. A definition carries its *own* source only, not that of definitions nested inside it, which are chunks in their own right.
+
+A file that yields no definitions — unparseable, non-Python, or simply a module of constants — falls back to a whole-file chunk. A file with no chunks would be absent from the candidate set entirely, which caps accuracy in a way indistinguishable from weak ranking.
+
+## Window
+
+The bound on a chunk's length: 2,048 characters, split on line boundaries, no overlap.
+
+Whole-file fallbacks average 16,296 characters against 191 for a function chunk — 1.6% of chunks carrying 55% of the corpus. Handed whole to an embedding model with a 512-token limit, everything past the limit is discarded silently, and a longer context does not fix it at any acceptable cost (ADR-0007). Splitting preserves the text instead.
+
+The same window applies to every chunk-indexed system. Two rungs windowing differently would make the delta between them measure the window rather than the variable under test.
 
 ## Chunk Aggregation
 

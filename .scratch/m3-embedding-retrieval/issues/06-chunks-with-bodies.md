@@ -1,6 +1,6 @@
 # 06 — Chunks with bodies: which half of chunking cost the recall
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -71,3 +71,72 @@ Sphinx is the sharpest single reading. It went 4.5% → 0.0% under issue 01, and
 ## Blocked by
 
 - [01 — BM25 over AST Chunks](01-bm25-over-chunks.md) — done
+
+## Comments
+
+**Closed 2026-08-04.** The question is answered, and decisively: **body exclusion was the cost, not the change of index unit.**
+
+Four lexical rows, same 244 dev instances, same tokeniser, same aggregation rule, same seed:
+
+| Row | Top-1 | Recall@3 | Recall@5 |
+|---|---|---|---|
+| `bm25` — whole file (M1) | 39.3% (33.4–45.6) | 59.3% | 68.5% |
+| `bm25-chunks` — unwindowed, no bodies (issue 01) | 37.3% (31.5–43.5) | 50.7% | 59.0% |
+| `bm25-chunks` — windowed, no bodies | 39.8% (33.8–46.0) | 52.0% | 61.3% |
+| `bm25-chunks-bodies` — windowed, bodies | **43.9%** (37.8–50.1) | **60.3%** | 65.7% |
+
+**Recall@3 goes 52.0 → 60.3, back to parity with whole-file search at 59.3.** That was the number issue 01 flagged as the readable one, and it recovers almost exactly. Recall@5 recovers most of the way (61.3 → 65.7 against 68.5). Top-1 reaches 43.9%, the best of any lexical row — though its interval overlaps every other row's, so on Top-1 alone nothing here is established.
+
+The reading issue 01 proposed was right: chunking was two changes, and only body exclusion explains a recall collapse. A token that was never indexed cannot be retrieved by any similarity function, and rung 2 would have inherited the same handicap had this not run first.
+
+### Windowing on its own is worth little
+
+`bm25-chunks` unwindowed → windowed is +2.5pp Top-1 and +2.3pp Recall@5, both well inside the intervals. That is a fair result to report: windowing was not adopted to raise the lexical number, it was adopted because the pinned embedding model truncates at 512 tokens and 1.6% of chunks carry 55% of the corpus (ADR-0007). It costs nothing lexically and buys the dense rung its content back.
+
+Recorded so the rung-2 write-up cannot credit windowing with the body gain.
+
+### Sphinx, and the M1 hypothesis
+
+M1 predicted Sphinx as the clearest case for rung 2, on the theory that its reports describe rendered output in vocabulary absent from the code. Issue 01 dropped it to 0.0%.
+
+**0.0% → 9.1% (windowing) → 18.2% (bodies)**, against rung 1's 4.5%. Four times the rung-1 number, with no model involved.
+
+So the M1 hypothesis is wrong in an informative way. Sphinx's vocabulary *is* in the code — it is in the function bodies, not the signatures and docstrings. The whole-file baseline was already finding it; chunking without bodies threw it away, and restoring bodies more than recovers it. That weakens the case for Sphinx being the sharpest test of embeddings, and it is left on the record rather than edited away.
+
+Django, the largest slice, moves the same way: 38.9 (rung 1) → 31.9 → 36.3 → **40.7**.
+
+### Corpus size
+
+Measured over all 32,667 distinct blobs in the dev split:
+
+| Chunk definition | Chunks | Tokens (~chars/4) | Longest chunk |
+|---|---|---|---|
+| unwindowed, no bodies (issue 01) | 753,421 | 106,216,710 | 16,296+ chars |
+| **windowed**, no bodies | 896,806 | 106,216,710 | 2,048 chars |
+| **windowed, with bodies** | 1,013,340 | 228,019,345 | 2,048 chars |
+
+**Windowing costs +19.0% chunks and zero tokens** — it redistributes text rather than adding or losing any, which is the whole claim, now measured rather than argued. The estimate in ADR-0007 was +13%; the real figure is +19%, because more chunks than just the whole-file fallbacks exceed 2,048 characters.
+
+Bodies bring the total to 1,013,340 chunks, **+34.5% over issue 01's corpus**, at 228M tokens. An earlier estimate put the body-inclusive corpus at 302.6M tokens; that was a crude upper bound that double-counted nested definitions, and excluding them brings it down by a quarter.
+
+For issue 03 this sets the index: 1,013,340 × 384 dimensions × 4 bytes = **1.56 GB** float32, and at the 75.7 chunks/s measured in issue 07 a full build is **~3.7 hours** rather than 2.8.
+
+### Decisions
+
+**Nested definitions are excluded from an enclosing definition's body.** A class body contains its methods, and each method is already a chunk. Left whole, a class would index every method's text a second time — inflating the corpus and making the class chunk match anything any of its methods matches, which is exactly what chunking exists to prevent. Pinned by `test_a_class_does_not_carry_its_methods_text`.
+
+**Windows carry no signature or docstring.** Both are already inside the split text; repeating them on each window would index them once per window and bias long definitions.
+
+**No overlap between windows.** Aggregation takes a file's best chunk, so a query matching across a boundary still scores in both windows and the file's rank is unaffected. Overlap would inflate the corpus to buy back what the aggregation rule already covers.
+
+**A single line longer than the budget is hard-split.** Minified and generated files exist, and one unbounded chunk is the document shape windowing is here to prevent.
+
+**Module-level code is still unindexed** when a file also defines functions. Bodies do not fix it, and it stays a stated cost of chunking rather than a silent one — pinned by a test.
+
+### The provenance guard fired twice
+
+**First:** a script written after the commit but before the run made the tree dirty, so the entry carried `-dirty` and the run was discarded and redone. Exactly what M1's issue 07 built the check for.
+
+**Second, and more interesting:** running two evaluations back-to-back cannot produce two clean entries, because **the first run's own `RESULTS.md` write dirties the tree for the second**. The check tests the working tree, and cannot distinguish "source changed" from "output file changed" — but a modified `RESULTS.md` genuinely cannot change a number, so this is a false positive.
+
+Not fixed here. Excluding the results log from the dirty check would tighten the guarantee, but loosening a provenance rule as a side effect of an unrelated issue is the wrong way to make that call. Filed as [issue 08](08-results-log-dirty-check.md).

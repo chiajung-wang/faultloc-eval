@@ -1,6 +1,6 @@
 # ADR-0007: A local embedding model, pinned by revision
 
-**Status:** Accepted · 2026-08-04 · *model pin confirmed by measurement 2026-08-04 (issue 07), conditional on issue 06 windowing the whole-file fallback chunks*
+**Status:** Accepted · 2026-08-04 · *model pin confirmed by measurement (issue 07); the windowing condition was met by issue 06 the same day*
 
 ## Context
 
@@ -16,6 +16,8 @@ Measured index volume, dev split, at code `234b566`:
 | Chunks | 753,421 |
 | Tokens, chunks as currently defined | 106,216,710 |
 | Tokens, if bodies are indexed (issue 06) | 302,596,012 |
+
+*Updated 2026-08-04 after issue 06 landed. The chunk definition now windows at 2,048 characters and indexes bodies, so the index this ADR sizes is **1,013,340 chunks at ~228M tokens** — +34.5% chunks over the row above. Windowing accounts for +19.0% of that at zero token cost; bodies account for the rest. The 302.6M estimate was a crude upper bound that double-counted nested definitions. At 384 dimensions the index is **1.56 GB** float32, and a full build is **~3.7 hours** at the throughput measured below.*
 
 ## Decision
 
@@ -118,6 +120,8 @@ The trade is monotonic and brutal: every token of context recovered costs roughl
 **The fix is to reshape the chunk, not to buy context.** Splitting each fallback into a sequence of windows sized to the model's limit preserves the text that truncation would discard, and does so at the small model's speed. Estimated: fallbacks carry ~58M tokens, which at 512 tokens per window is ~114,000 additional chunks — roughly **+13% chunk count for 0% content loss**, still inside three hours. Against that, `Qwen3-Embedding-0.6B` buys a 3.1% loss for 487 hours.
 
 **Decision: the pin holds** — `BAAI/bge-small-en-v1.5` at the revision above — but the reasoning is now measured rather than assumed, and it is **conditional on issue 06 windowing the fallback chunks instead of letting them be truncated.** Without that, the pin means discarding 59% of the corpus, which no accuracy number could survive being asked about.
+
+*Condition met 2026-08-04.* Issue 06 landed windowing at 2,048 characters, measured at +19.0% chunks for zero token loss, with no chunk exceeding the budget. The pin is now unconditional. Note the index it sizes grew: 1,013,340 chunks with bodies included, so **1.56 GB and ~3.7 hours**, not 1.16 GB and 2.8.
 
 **One caveat, stated so it cannot flatter the result.** 75.7 chunks/s is a floor for a naive per-batch `encode()` loop with an MPS round-trip per batch, not the model's ceiling; a real indexer batching more aggressively will beat it. The comparison is sound because all three models ran the identical harness, and the 190× gap between fastest and slowest is far too large for implementation overhead to reverse. Issue 03 should not treat 2.8 hours as the achievable index time — it is an upper bound.
 
