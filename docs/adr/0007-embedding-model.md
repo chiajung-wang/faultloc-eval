@@ -63,11 +63,22 @@ Chunk embeddings are cached keyed by **blob SHA**, matching the tree cache in `R
 
 ## Revisit condition
 
-If rung 2 fails to beat rung 1 *and* issue 06 shows that indexing bodies is what matters, a code-specialised hosted model becomes worth measuring — because code-specialisation applies most to body text, which the current chunk definition does not index at all. It would be published as an additional variant row with its cost, never as a replacement that quietly changes what the rung-2 number means.
+If rung 2 fails to beat rung 1 *and* issue 06 shows that indexing bodies is what matters, a hosted model becomes worth measuring — because the plausible advantage is over body text, which the current chunk definition does not index at all. It would be published as an additional variant row with its cost, never as a replacement that quietly changes what the rung-2 number means.
+
+**Select by criteria at the time, not by a name written here.** Hosted embedding models turn over every few months, and a model named in this ADR will be stale before the condition is met. The criteria:
+
+1. **Long enough context** to hold a body-inclusive chunk without truncation — the constraint that makes hosted worth considering at all, since the local pick caps at 512 tokens
+2. **A pinnable version identifier**, so the variant row's provenance is as reproducible as every other number in `RESULTS.md`
+3. **Priced, with the price reported in the row** — a hosted rung that hides its cost defeats the ladder
+4. **Evidence on code retrieval**, treated as a reason to *measure* rather than as the result
+
+Criterion 4 needs stating plainly: this project measures its own Top-1 on its own instances. A vendor's benchmark claim decides which model is worth one run, never what the number is.
+
+**The first draft of this ADR named `voyage-code-3` here, and that was wrong on its own terms.** It was chosen for code-specialisation, but Voyage's current material states that its general-purpose voyage-4 family outperforms the domain-specific models — so the stated reason had already stopped holding. `voyage-context-4` is the more interesting candidate today precisely because it is chunking-aware, which is this milestone's open question. Recorded rather than quietly edited away: a decision written from recall instead of a check is the failure mode this ADR series exists to prevent.
 
 ## Alternatives rejected
 
-- **`voyage-code-3`** — code-specialised and likely stronger on identifier-dense text, with 200M free tokens covering the first index. Rejected on reproducibility: no API key, no number. Its advantage also applies mostly to body text the index does not currently contain
+- **Voyage (`voyage-code-3` priced at $0.18/1M, with 200M free tokens covering the first index)** — rejected on reproducibility: no API key, no number. Note the code-specialisation argument is weaker than it looks; see the revisit condition above
 - **OpenAI `text-embedding-3-small`** — cheapest hosted option at roughly $2 per dev-split index, but carries the same API-key and silent-reweighting exposure for a saving that is not the constraint
 - **`BAAI/bge-base-en-v1.5`** — same family, 768 dimensions; doubles storage and compute for a gain this project has not measured and does not need to guess at
 - **`jinaai/jina-embeddings-v2-base-code`** — code-trained with an 8192-token context that would fit the fallback chunks whole. Rejected for `trust_remote_code`; the strongest candidate to revisit if the condition above is met

@@ -82,6 +82,10 @@ Modest either way. Three multipliers keep it from being negligible: the test spl
 
 **bge is asymmetric.** Queries need the prefix `Represent this sentence for searching relevant passages: `; documents get none. Omitting it costs retrieval quality quietly, so it belongs in code with a test, not in a comment.
 
-### What was rejected
+### What was rejected, and a correction to how it was written
 
-`voyage-code-3` was the strongest hosted candidate and is the one to revisit — but its code-specialisation advantage applies mostly to *body* text, which the current chunk definition does not index. That makes issue 06 a prerequisite for the comparison being meaningful at all. Revisit condition recorded in the ADR.
+Hosted was rejected on reproducibility, not price. The plausible hosted advantage is over *body* text, which the current chunk definition does not index — so issue 06 is a prerequisite for the comparison being meaningful at all.
+
+**The first draft of ADR-0007 named `voyage-code-3` as the model to revisit, and that was written from recall rather than a check.** Voyage's current material states its general-purpose voyage-4 family outperforms the domain-specific models, so the code-specialisation reason had already stopped holding; `voyage-context-4` — chunking-aware, which is this milestone's live question — is the more interesting candidate today. The ADR now names **selection criteria** instead of a model, because hosted models turn over faster than a conditional revisit that is months away.
+
+Left on the record rather than edited away, for the same reason issue 05's Django prediction was: a decision written from memory instead of a check is exactly what this ADR series exists to catch.
