@@ -24,6 +24,7 @@ from faultloc.reporting import (
     today,
 )
 from faultloc.rungs.bm25 import Bm25Rung
+from faultloc.rungs.bm25_chunks import Bm25ChunksRung
 from faultloc.scoring import score
 
 app = typer.Typer(
@@ -32,7 +33,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-RUNGS = {"bm25": Bm25Rung}
+RUNGS = {"bm25": Bm25Rung, "bm25-chunks": Bm25ChunksRung}
 DEFAULT_RESULTS = Path("RESULTS.md")
 
 
@@ -44,7 +45,9 @@ def version() -> None:
 
 @app.command()
 def evaluate(
-    rung: Annotated[str, typer.Option(help="Which rung: bm25 | embed | rerank | agent")] = "bm25",
+    rung: Annotated[
+        str, typer.Option(help="Which rung: bm25 | bm25-chunks | embed | rerank | agent")
+    ] = "bm25",
     split: Annotated[str, typer.Option(help="Dataset split: dev | test")] = "dev",
     limit: Annotated[int, typer.Option(help="Evaluate only the first N instances; 0 = all.")] = 0,
     note: Annotated[str, typer.Option(help="One line for the log: what the number means.")] = "",
@@ -53,7 +56,9 @@ def evaluate(
 ) -> None:
     """Run a rung against a split and report Top-1, Recall@3, Recall@5, cost, latency.
 
-    M1 implements the ``bm25`` rung only.
+    ``bm25-chunks`` is the ablation, not a rung of the ladder: it isolates the
+    chunking half of rung 2's change so the embedding half can be priced on its
+    own. See the M3 PRD.
     """
     if rung not in RUNGS:
         raise typer.BadParameter(f"unknown rung {rung!r}; available: {', '.join(sorted(RUNGS))}")
