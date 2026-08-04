@@ -45,6 +45,8 @@ Each decision carries a stated rationale and its rejected alternatives:
 | [ADR-0003](docs/adr/0003-baseline-ladder.md) | Build a measured ladder, not the top rung |
 | [ADR-0004](docs/adr/0004-calibrated-confidence.md) | Confidence from a calibrator, not model self-report |
 | [ADR-0005](docs/adr/0005-langgraph.md) | LangGraph for the agent loop |
+| [ADR-0006](docs/adr/0006-datasets.md) | SWE-bench Verified as the anchor, a self-mined Fresh Set as the control |
+| [ADR-0007](docs/adr/0007-embedding-model.md) | A local embedding model, pinned by revision |
 
 ## Evaluation
 

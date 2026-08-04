@@ -1,6 +1,6 @@
 # 02 — Pick the embedding model, record ADR-0007
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -36,3 +36,52 @@ A hosted model chosen here does not have to be the only one measured — but any
 ## Blocked by
 
 None — can start immediately, in parallel with issue 01.
+
+## Comments
+
+**Closed 2026-08-04.** Decision: **local**, `BAAI/bge-small-en-v1.5` @ `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`, 384 dimensions, MIT. Recorded in [ADR-0007](../../../docs/adr/0007-embedding-model.md).
+
+### The issue's framing was wrong on one point
+
+This issue said "hosted" as if it were a first-party option. **Anthropic publishes no embeddings endpoint** — the API surface is Messages, Batches, Files, Models, and Token Counting. Hosted here means a third party (Voyage, OpenAI, Cohere), which is a different dependency from the one rungs 3 and 4 already carry. Corrected in the ADR.
+
+### Measured, not estimated
+
+Index volume over the whole dev split at code `234b566`:
+
+```
+distinct blobs:  32,667
+chunks:          753,421
+tokens now:      106,216,710
+tokens w/bodies: 302,596,012
+```
+
+~141 tokens per chunk on average, and the distribution is heavily skewed: 5.5% of chunks are whole-file fallbacks and they carry most of the tokens.
+
+The first estimate made during this discussion was ~7M tokens — **wrong by 15×**, because it assumed a chunk was a signature plus a docstring and forgot that the fallback chunks contain entire files. The measurement changed the shape of the cost argument (a full re-index runs $19 at `voyage-code-3`, not $1.26), though not the conclusion.
+
+### Cost did not decide it
+
+| Model | $/1M | 106M (as-is) | 303M (with bodies) |
+|---|---|---|---|
+| `voyage-code-3` | $0.18 | $19.12 | $54.47 |
+| OpenAI `text-embedding-3-small` | $0.02 | $2.12 | $6.05 |
+| local | — | $0 | $0 |
+
+Modest either way. Three multipliers keep it from being negligible: the test split adds ~50% more instances at M7, a chunk-definition change invalidates the blob cache wholesale rather than incrementally, and a second model for comparison doubles it again.
+
+**Reproducibility decided it.** Every `RESULTS.md` entry claims a reader can regenerate the number from a commit, a dataset revision, and a seed. A hosted model breaks that twice — reproduction needs someone else's API key, and weights can change under a stable name with no revision to pin.
+
+### Why pinning a revision, not just a name
+
+`sentence-transformers/all-MiniLM-L6-v2` — the obvious alternative — had its main branch move on **2026-06-01**. `BAAI/bge-small-en-v1.5` has not moved since 2024-02-22. A model name is not provenance, and this is the live demonstration of it.
+
+### Two consequences that will bite if not written down
+
+**The 512-token cap silently truncates the fallback chunks.** They carry most of the corpus, and each will be represented by its first ~512 tokens. Issue 06 should cap fallback length explicitly rather than let the tokenizer do it invisibly — silent truncation is indistinguishable from weak retrieval in every metric published.
+
+**bge is asymmetric.** Queries need the prefix `Represent this sentence for searching relevant passages: `; documents get none. Omitting it costs retrieval quality quietly, so it belongs in code with a test, not in a comment.
+
+### What was rejected
+
+`voyage-code-3` was the strongest hosted candidate and is the one to revisit — but its code-specialisation advantage applies mostly to *body* text, which the current chunk definition does not index. That makes issue 06 a prerequisite for the comparison being meaningful at all. Revisit condition recorded in the ADR.
