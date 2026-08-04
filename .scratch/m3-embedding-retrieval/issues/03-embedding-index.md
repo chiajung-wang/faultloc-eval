@@ -36,4 +36,7 @@ Report the actual distinct-blob count against the estimate made in ADR-0007. If 
 ## Blocked by
 
 - [01 — BM25 over AST Chunks](01-bm25-over-chunks.md) — supplies the chunker
+- [06 — Chunks with bodies](06-chunks-with-bodies.md) — settles **what** gets embedded
 - [02 — Pick the embedding model](02-embedding-model-adr.md) — supplies the model
+
+Issue 06 was added after 01 measured a 9pp recall drop from chunking. It decides whether an AST Chunk should carry its body, which is the content this issue pays to embed. Building the index first would spend real money on documents already known to be missing the tokens reports quote most.

@@ -21,7 +21,10 @@ Three rows, same instances, same scorer:
 |---|---|---|---|
 | bm25 (M1) | lexical | whole file | — |
 | bm25-chunks | lexical | AST Chunk | chunking alone |
+| bm25-chunks + bodies | lexical | AST Chunk + body | body exclusion, within chunking |
 | embed | dense | AST Chunk | embeddings, given chunking |
+
+The fourth row was added after the second was measured. Chunking alone cost 8.6pp of Recall@3 and 9.5pp of Recall@5, and a recall drop that size means files stopped being retrievable rather than being ranked lower — a content effect. It exposed that "chunking" is itself two changes: the unit shrinks to a definition, *and* the body stops being indexed. Issue 06 separates them, and it runs before anything is paid to embed, because `CONTEXT.md`'s AST Chunk definition is what rung 2 would index.
 
 ## Done when
 

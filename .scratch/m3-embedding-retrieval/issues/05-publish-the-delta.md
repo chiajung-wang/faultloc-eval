@@ -10,10 +10,11 @@ Status: ready-for-agent
 
 Closes M3. The three numbers now exist in `RESULTS.md`; this slice turns them into a stated result.
 
-The README ladder table gains the `bm25-chunks` row and fills the embedding row, each with cost per instance and latency. The delta is reported **twice**, because there are two of them and they answer different questions:
+The README ladder table gains the ablation rows and fills the embedding row, each with cost per instance and latency. The delta is reported **once per variable**, because there are three of them and they answer different questions:
 
 - chunking alone — `bm25-chunks` over `bm25`, at no model cost
-- embeddings given chunking — `embed` over `bm25-chunks`, at its measured price
+- body exclusion within chunking — the issue-06 variant against `bm25-chunks`, also free
+- embeddings given whatever chunk definition survived — `embed` over the best lexical chunk row, at its measured price
 
 Reporting only `embed` over `bm25` would attribute the whole movement to the model, which is the overclaim the ablation exists to prevent.
 
@@ -39,4 +40,5 @@ If the ablation shows chunking did the work and embeddings added little, that is
 ## Blocked by
 
 - [01 — BM25 over AST Chunks](01-bm25-over-chunks.md)
+- [06 — Chunks with bodies](06-chunks-with-bodies.md)
 - [04 — Rung 2: embedding retrieval end to end](04-embed-rung.md)
