@@ -13,11 +13,17 @@ dependencies = [
     "typer>=0.15",
 ]
 
-[dependency-groups]
-bench = [
+[project.optional-dependencies]
+# Rung 2 and the index command. Kept optional so rung 1 stays installable
+# without torch, which is two orders of magnitude larger than everything else
+# in the dependency tree.
+embed = [
+    "numpy>=1.26",
     "sentence-transformers>=3.0",
     "torch>=2.4",
 ]
+
+[dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",

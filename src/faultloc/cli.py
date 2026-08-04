@@ -17,6 +17,12 @@ import typer
 from faultloc import __version__
 from faultloc.dataset.splits import load_splits
 from faultloc.dataset.verified import DATASET_ID, DATASET_REVISION, load_verified_set
+from faultloc.embedding import (
+    DEFAULT_INDEX_ROOT,
+    EmbeddingIndex,
+    build_index,
+    load_encoder,
+)
 from faultloc.reporting import (
     Provenance,
     code_version,
@@ -25,6 +31,7 @@ from faultloc.reporting import (
     render_terminal,
     today,
 )
+from faultloc.repos import RepoStore
 from faultloc.rungs import Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
@@ -48,6 +55,54 @@ DEFAULT_RESULTS = Path("RESULTS.md")
 def version() -> None:
     """Print the package version."""
     typer.echo(__version__)
+
+
+@app.command()
+def index(
+    split: Annotated[str, typer.Option(help="Dataset split: dev | test")] = "dev",
+    limit: Annotated[int, typer.Option(help="Index only the first N instances; 0 = all.")] = 0,
+    root: Annotated[Path, typer.Option(help="Where the index lives.")] = DEFAULT_INDEX_ROOT,
+    device: Annotated[str, typer.Option(help="torch device; blank to auto-detect.")] = "",
+) -> None:
+    """Embed every AST Chunk a split needs, skipping blobs already indexed.
+
+    Separate from ``evaluate`` on purpose: this is a long, resumable, costed
+    job, and a rung that rebuilt its index inside the prediction loop is the
+    bug M1 already found once. Re-running is near-free -- blobs are keyed by
+    content hash, so only new content is embedded.
+    """
+    loaded = load_verified_set()
+    splits = load_splits()
+    instances = splits.select(loaded.instances, split)
+    if not instances:
+        raise typer.BadParameter(f"split {split!r} selected no instances")
+    if limit:
+        instances = instances[:limit]
+
+    store = EmbeddingIndex(root=root)
+    typer.echo(f"Indexing {len(instances)} instances into {store.root}")
+    typer.echo(f"  model {store.spec.name} @ {store.spec.revision[:12]}")
+
+    def progress(done: int, total: int) -> None:
+        if done % 25 == 0 or done == total:
+            typer.echo(f"  ... {done}/{total} instances", nl=True)
+
+    report = build_index(
+        instances,
+        store=RepoStore(),
+        index=store,
+        encode=load_encoder(store.spec, device=device or None),
+        on_progress=progress,
+    )
+
+    typer.echo(
+        f"\n  blobs       {report.blobs_total:,} "
+        f"({report.blobs_embedded:,} embedded, {report.blobs_reused:,} reused)"
+    )
+    typer.echo(f"  chunks      {report.chunks_embedded:,} embedded")
+    typer.echo(f"  index size  {store.size_bytes() / 1e9:.2f} GB")
+    typer.echo(f"  wall clock  {report.wall_clock_s / 60:.1f}m")
+    typer.echo(f"  cost        ${report.cost_usd:.2f}")
 
 
 @app.command()

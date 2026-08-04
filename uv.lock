@@ -453,11 +453,14 @@ dependencies = [
     { name = "typer" },
 ]
 
-[package.dev-dependencies]
-bench = [
+[package.optional-dependencies]
+embed = [
+    { name = "numpy" },
     { name = "sentence-transformers" },
     { name = "torch" },
 ]
+
+[package.dev-dependencies]
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -467,17 +470,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "datasets", specifier = ">=3.0" },
+    { name = "numpy", marker = "extra == 'embed'", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "rich", specifier = ">=13.9" },
+    { name = "sentence-transformers", marker = "extra == 'embed'", specifier = ">=3.0" },
+    { name = "torch", marker = "extra == 'embed'", specifier = ">=2.4" },
     { name = "typer", specifier = ">=0.15" },
 ]
+provides-extras = ["embed"]
 
 [package.metadata.requires-dev]
-bench = [
-    { name = "sentence-transformers", specifier = ">=3.0" },
-    { name = "torch", specifier = ">=2.4" },
-]
 dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-cov", specifier = ">=6.0" },
