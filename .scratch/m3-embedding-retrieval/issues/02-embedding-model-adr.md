@@ -39,7 +39,9 @@ None — can start immediately, in parallel with issue 01.
 
 ## Comments
 
-**Closed 2026-08-04.** Decision: **local**, `BAAI/bge-small-en-v1.5` @ `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`, 384 dimensions, MIT. Recorded in [ADR-0007](../../../docs/adr/0007-embedding-model.md).
+**Closed 2026-08-04.** Decision: **local**. Recorded in [ADR-0007](../../../docs/adr/0007-embedding-model.md).
+
+> **Partially reopened the same day.** Local vs hosted is settled and rests on reproducibility, which no measurement changes. The *specific model* — `BAAI/bge-small-en-v1.5` @ `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a` — is **provisional**: the candidate set was never compared against anything from 2025–2026, and the 512-token truncation written up below as an accepted consequence turns out to be a property of a 2024 model rather than of running locally. [Issue 07](07-embedding-model-bakeoff.md) measures it and amends the ADR. The reasoning below is left intact so the correction is visible.
 
 ### The issue's framing was wrong on one point
 

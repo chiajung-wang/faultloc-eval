@@ -37,6 +37,9 @@ Report the actual distinct-blob count against the estimate made in ADR-0007. If 
 
 - [01 — BM25 over AST Chunks](01-bm25-over-chunks.md) — supplies the chunker
 - [06 — Chunks with bodies](06-chunks-with-bodies.md) — settles **what** gets embedded
-- [02 — Pick the embedding model](02-embedding-model-adr.md) — supplies the model
+- [02 — Pick the embedding model](02-embedding-model-adr.md) — settles local vs hosted
+- [07 — Local embedding model bake-off](07-embedding-model-bakeoff.md) — settles **which** local model
 
 Issue 06 was added after 01 measured a 9pp recall drop from chunking. It decides whether an AST Chunk should carry its body, which is the content this issue pays to embed. Building the index first would spend real money on documents already known to be missing the tokens reports quote most.
+
+Issue 07 was added after ADR-0007's model pin turned out to rest on a stale candidate set. It decides the model, its context limit, and therefore this index's dimensions, disk size, and build time — every parameter this issue is built around.

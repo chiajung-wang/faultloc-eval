@@ -1,6 +1,6 @@
 # ADR-0007: A local embedding model, pinned by revision
 
-**Status:** Accepted · 2026-08-04
+**Status:** Accepted · 2026-08-04 — *local vs hosted is settled; the specific local model is **provisional** pending measurement, see “The candidate set was stale” below*
 
 ## Context
 
@@ -57,6 +57,8 @@ Chunk embeddings are cached keyed by **blob SHA**, matching the tree cache in `R
 
 **The 512-token cap truncates the whole-file fallback chunks.** 5.5% of chunks are whole-file fallbacks and they carry most of the 106M-token corpus; each is represented by its first ~512 tokens. This should be made explicit — a length cap decided in issue 06 — rather than left to the tokenizer to do invisibly, because silent truncation looks identical to weak retrieval in every metric published.
 
+*Amended 2026-08-04: this consequence is a property of the model chosen, not of the decision to run locally. See below.*
+
 **The query prefix is load-bearing.** bge models are trained asymmetrically: queries carry the instruction above, documents carry none. Omitting it costs retrieval quality quietly, so it belongs in code with a test rather than in a comment.
 
 **A third party can reproduce rung 2 with no API key**, which is the property this decision was made to buy.
@@ -75,6 +77,29 @@ If rung 2 fails to beat rung 1 *and* issue 06 shows that indexing bodies is what
 Criterion 4 needs stating plainly: this project measures its own Top-1 on its own instances. A vendor's benchmark claim decides which model is worth one run, never what the number is.
 
 **The first draft of this ADR named `voyage-code-3` here, and that was wrong on its own terms.** It was chosen for code-specialisation, but Voyage's current material states that its general-purpose voyage-4 family outperforms the domain-specific models — so the stated reason had already stopped holding. `voyage-context-4` is the more interesting candidate today precisely because it is chunking-aware, which is this milestone's open question. Recorded rather than quietly edited away: a decision written from recall instead of a check is the failure mode this ADR series exists to prevent.
+
+## The candidate set was stale (amended 2026-08-04)
+
+The local-vs-hosted argument above stands: it rests on reproducibility, and no measurement changes it. **The choice of local model does not stand on the same evidence.**
+
+`bge-small-en-v1.5` is a February 2024 model, and it was never compared against anything from 2025–2026. The current field, with revisions:
+
+| Model | params | dim | context | licence | last moved |
+|---|---|---|---|---|---|
+| `BAAI/bge-small-en-v1.5` | 33M | 384 | **512** | MIT | 2024-02-22 |
+| `Qwen/Qwen3-Embedding-0.6B` | 596M | 1024 (MRL) | 32k | Apache-2.0 | 2026-04-20 |
+| `BAAI/bge-m3` | 568M | 1024 | 8192 | MIT | 2024-07-03 |
+| `Snowflake/snowflake-arctic-embed-m-v2.0` | 305M | 768 | 8192 | Apache-2.0 | 2025-04-24 |
+| `google/embeddinggemma-300m` | 308M | 768 (MRL) | 2048 | Gemma, gated | 2025-09-25 |
+| `jinaai/jina-embeddings-v3` | 572M | 1024 | 8192 | CC-BY-NC-4.0 | 2026-04-08 |
+
+**The 512-token truncation recorded above as an accepted consequence is therefore not inherent** — every current option carries 2k–32k context. This ADR documented a stale pick's limitation as though it were a property of running locally.
+
+The original reasoning is not worthless: 33M parameters against 596M is roughly 18× the compute over 753,421 chunks, on a laptop, re-run whenever the chunk definition changes. That constraint is real. It was also never measured, which is the actual defect — two decisions in this ADR were written to different standards of evidence, and only the revision pins were checked.
+
+**Resolved by measurement, not by a second guess.** Issue 07 benchmarks the incumbent against `bge-m3` and `Qwen3-Embedding-0.6B` on throughput, index size, peak RAM, and truncation rate, and amends this ADR with the result — confirming the pin or replacing it. It is scheduled before issue 03, so nothing is built on an unmeasured pin.
+
+Left on the record rather than silently corrected: an ADR that hides having been wrong is worth less than one that shows its own correction, and this series exists to catch exactly the failure it committed.
 
 ## Alternatives rejected
 
