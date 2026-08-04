@@ -55,6 +55,14 @@ A rung's value is the delta it adds over the rung below, at its cost and latency
 
 The indexed unit at rung 2: one function or class, embedded as its signature, docstring, and file path. Chosen because docstrings carry natural language, partially bridging the gap between prose issue text and code.
 
+A file that yields no definitions — unparseable, non-Python, or simply a module of constants — falls back to a single whole-file chunk. A file with no chunks would be absent from the candidate set entirely, which caps accuracy in a way indistinguishable from weak ranking.
+
+## Chunk Aggregation
+
+The rule turning many chunk scores into one file score: **a file scores as its best chunk**. `sum` would reward length, `mean` would dilute a real match with irrelevant siblings.
+
+Every chunk-indexed system shares this rule. Two of them aggregating differently would make the delta between them measure aggregation rather than the variable under test.
+
 ## Prediction
 
 A rung's output for one Instance: a ranked list of file paths plus a **Confidence**.
