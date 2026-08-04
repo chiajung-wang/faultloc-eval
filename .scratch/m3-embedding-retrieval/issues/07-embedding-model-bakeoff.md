@@ -1,6 +1,6 @@
 # 07 — Measure before pinning: local embedding model bake-off
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -34,7 +34,7 @@ Excluded, and the reasons belong in the write-up: `google/embeddinggemma-300m` i
 
 ### Measurements
 
-**Throughput** — chunks/sec on real chunk text drawn from the dev split, sampled across repositories and deliberately including whole-file fallback chunks, which are 5.5% of chunks but carry most of the tokens. Extrapolate to all 753,421. Report the hardware and whether MPS, CUDA, or CPU was used; a number without the device is meaningless.
+**Throughput** — chunks/sec on real chunk text drawn from the dev split, sampled across repositories and deliberately including whole-file fallback chunks, which are a small share of chunks but carry most of the tokens. Extrapolate to all 753,421. Report the hardware and whether MPS, CUDA, or CPU was used; a number without the device is meaningless.
 
 **Index size on disk** — dimensions × 4 bytes × 753,421. 1.16 GB at 384d, 3.09 GB at 1024d. Note where MRL can cut it without re-embedding.
 
@@ -67,3 +67,53 @@ Watch for a confound: the first run of any model includes its download. Time a w
 ## Blocked by
 
 - [01 — BM25 over AST Chunks](01-bm25-over-chunks.md) — done; supplies the chunker the sample is drawn from
+
+## Comments
+
+**Closed 2026-08-04.** The pin holds — but for a different reason than ADR-0007 originally gave, and conditional on a change to issue 06.
+
+Apple M5, 25.7 GB RAM, MPS, `sentence-transformers` 5.6.1. 25,000 chunks reservoir-sampled uniformly from all 753,421; identical harness, order, and token-budgeted batching for every model. Raw results in `data/bench/results.jsonl`.
+
+| Model | ctx | chunks/s | full index | index | peak RSS | download | corpus tokens dropped |
+|---|---|---|---|---|---|---|---|
+| `bge-small-en-v1.5` | 512 | **75.7** | **2.8 h** | 1.16 GB | 0.69 GB | 0.27 GB | **59.3%** |
+| `bge-m3` | 8192 | 2.3 | 89.5 h | 3.09 GB | 2.53 GB | 4.84 GB | 25.9% |
+| `Qwen3-Embedding-0.6B` | 32768 | 0.4 | **487 h** | 3.09 GB | 1.60 GB | 2.42 GB | 3.1% |
+
+### The trade is monotonic and far steeper than expected
+
+Every token of recovered context costs roughly two orders of magnitude of throughput. 487 hours is twenty days for a single index, on a corpus that rebuilds whenever the chunk definition changes. The premise behind this issue — that a 2026 long-context model would remove the truncation problem — is false on this hardware. It removes the truncation and replaces it with a wall.
+
+### The measurement reframed the question
+
+All three rows are dominated by the same 1.6% of chunks. `bge-m3` at 8192 tokens still discards a quarter of the corpus, which means the fallback tail runs far past 8192. The problem was never the model's context window. **It is that a whole file is being handed to a sentence encoder as a single document.**
+
+Windowing a fallback into a sequence of 512-token pieces recovers the text that truncation discards, at the small model's speed: fallbacks carry ~58M tokens, so ~114,000 extra chunks — **+13% chunk count for 0% content loss**, still under three hours. `Qwen3-Embedding-0.6B` buys a 3.1% loss for 487 hours.
+
+**So the pin holds, conditional on issue 06 windowing rather than truncating.** Without that change, `bge-small` means discarding 59% of the corpus, which no published accuracy number could survive being asked about.
+
+### A figure this corrected
+
+The whole-file fallback share was quoted as **5.5%** in ADR-0007 and issues 01, 02, and this one. That came from a 40-instance probe. Measured over all 753,421 chunks by uniform reservoir sample:
+
+| kind | count | share of chunks | share of text | mean chars |
+|---|---|---|---|---|
+| function | 22,041 | 88.2% | 35.7% | 191 |
+| class | 2,557 | 10.2% | 8.8% | 407 |
+| **file** (fallback) | 402 | **1.6%** | **55.4%** | **16,296** |
+
+The claim built on it survives and is now measured rather than inferred — fallbacks do carry the majority of the corpus — but the share is 1.6%, not 5.5%, and the skew is far sharper: 85× the mean size of a function chunk. Corrected everywhere it appeared.
+
+### Caveats stated so they cannot flatter the result
+
+**75.7 chunks/s is a floor, not a ceiling.** It measures a naive per-batch `encode()` loop with an MPS round-trip per batch. A real indexer batching more aggressively will beat it, so issue 03 must not treat 2.8 hours as the achievable index time. The comparison is still sound — all three ran the identical harness, and a 190× gap cannot be reversed by harness overhead.
+
+**Truncation percentages ride on 402 sampled chunks.** Those carry 55% of the sampled text, so the estimate is noisy in a way a bare percentage hides. The sample's own extrapolated corpus size, 89.0M tokens, differs ~16% from the exact 106.2M measured over every blob — that gap is the sampling error on this statistic, and the truncation figures should be read with the same width.
+
+**Retrieval quality was deliberately not measured**, as the issue specified. These numbers say which models are affordable, not which retrieves best. That question is Top-1 on this project's own instances, and it belongs to issue 04.
+
+### Two bugs worth recording
+
+**The first benchmark run measured nothing.** A `for spec in "model revision"` loop with `set -- $spec` silently passed each pair as one argument — zsh does not word-split unquoted parameter expansions the way bash does. All three models failed identically with `Repo id must use alphanumeric chars`, which at least made the failure loud rather than subtly wrong.
+
+**Fixed-size batching would have made the comparison meaningless.** A batch of 32 whole-file chunks is ~1M tokens on a 32k-context model — enough to exhaust memory — while a batch small enough to be safe there would throttle the 512-token model and understate it. Batches are built to an 8192-token budget instead, which is both memory-safe and the policy a real indexer would use.

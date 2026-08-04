@@ -64,7 +64,7 @@ Recall falling means ground-truth files stopped being *retrievable at all*, not 
 
 The second is the one that will have done this. Issue reports quote identifiers from inside function bodies constantly: called functions, local names, string literals, error messages, traceback frames. Whole-file BM25 matched all of them. Chunk documents contain none of them.
 
-Measured on a 40-instance sample: median 3,360 candidate files becomes median 11,888 chunks, a 3.5× document count — but each document is a fraction of the text. 5.5% of chunks are whole-file fallbacks (unparseable, non-Python, or definition-free modules); the rest are 80,434 functions and 13,874 classes.
+Measured on a 40-instance sample: median 3,360 candidate files becomes median 11,888 chunks, a 3.5× document count — but each document is a fraction of the text. 5.5% of chunks are whole-file fallbacks (unparseable, non-Python, or definition-free modules); the rest are 80,434 functions and 13,874 classes. *(Superseded: measured over all 753,421 chunks in [issue 07](07-embedding-model-bakeoff.md), fallbacks are **1.6%** of chunks but carry **55%** of the corpus text. This 40-instance probe over-counted their number and under-stated their weight.)*
 
 `CONTEXT.md` defines an AST Chunk as signature + docstring + path, so this rung indexed exactly what rung 2 will embed. **The handicap is therefore inherited.** Embeddings will be asked to close a gap that starts ~9pp of recall below where rung 1 already stands, using documents from which the highest-signal lexical tokens have been removed.
 
@@ -86,7 +86,7 @@ Two other repos moved the other way and are not explained by this: `sympy` 36.1 
 
 **Path tokens are added per file, never cached with the chunk.** One blob can be reachable at several paths, so a cache keyed by content hash would otherwise serve whichever path it saw first. Pinned by a test asserting no path token appears in the cache.
 
-**Every file yields at least one chunk.** Unparseable source, non-Python source the filter keeps, and definition-free modules all fall back to a whole-file chunk — 5.5% of the corpus. A file with no chunks cannot be predicted, and that ceiling looks exactly like weak ranking in every metric published.
+**Every file yields at least one chunk.** Unparseable source, non-Python source the filter keeps, and definition-free modules all fall back to a whole-file chunk — 1.6% of chunks, but 55% of the corpus text. A file with no chunks cannot be predicted, and that ceiling looks exactly like weak ranking in every metric published.
 
 **The harness was not touched.** Loader, splits, scorer, and results log took the new rung unchanged, which is the first real test of ADR-0003's claim that the rung contract was fixed before rung 1 existed.
 

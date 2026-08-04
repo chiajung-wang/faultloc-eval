@@ -1,6 +1,6 @@
 # ADR-0007: A local embedding model, pinned by revision
 
-**Status:** Accepted · 2026-08-04 — *local vs hosted is settled; the specific local model is **provisional** pending measurement, see “The candidate set was stale” below*
+**Status:** Accepted · 2026-08-04 · *model pin confirmed by measurement 2026-08-04 (issue 07), conditional on issue 06 windowing the whole-file fallback chunks*
 
 ## Context
 
@@ -55,9 +55,9 @@ Chunk embeddings are cached keyed by **blob SHA**, matching the tree cache in `R
 
 **Rung 2's cost column will read `$0.00`.** That weakens the priced-ladder story at exactly the rung it was meant to start biting. Accepted: rung 3 puts real money on the table, and a fabricated cost would be worse than a zero.
 
-**The 512-token cap truncates the whole-file fallback chunks.** 5.5% of chunks are whole-file fallbacks and they carry most of the 106M-token corpus; each is represented by its first ~512 tokens. This should be made explicit — a length cap decided in issue 06 — rather than left to the tokenizer to do invisibly, because silent truncation looks identical to weak retrieval in every metric published.
+**The 512-token cap truncates the whole-file fallback chunks.** Whole-file fallbacks are **1.6%** of chunks but carry **55%** of the corpus text, at a mean of 16,296 characters against 191 for a function chunk. At a 512-token limit, 3.55% of chunks are over the limit and an estimated **63M of the 106M corpus tokens are discarded**. This must be made explicit — a length policy decided in issue 06 — rather than left to the tokenizer to do invisibly, because silent truncation looks identical to weak retrieval in every metric published.
 
-*Amended 2026-08-04: this consequence is a property of the model chosen, not of the decision to run locally. See below.*
+*Amended 2026-08-04, twice. The 5.5% fallback share originally written here came from a 40-instance probe; measured over all 753,421 chunks it is 1.6%, and the skew is sharper than described. Issue 07 then measured the truncation loss at 59% of corpus tokens — far past what "accepted consequence" was covering, and the reason the answer is to reshape the chunks rather than to accept the loss. See below.*
 
 **The query prefix is load-bearing.** bge models are trained asymmetrically: queries carry the instruction above, documents carry none. Omitting it costs retrieval quality quietly, so it belongs in code with a test rather than in a comment.
 
@@ -69,7 +69,7 @@ If rung 2 fails to beat rung 1 *and* issue 06 shows that indexing bodies is what
 
 **Select by criteria at the time, not by a name written here.** Hosted embedding models turn over every few months, and a model named in this ADR will be stale before the condition is met. The criteria:
 
-1. **Long enough context** to hold a body-inclusive chunk without truncation — the constraint that makes hosted worth considering at all, since the local pick caps at 512 tokens
+1. **Long enough context** to hold a body-inclusive chunk without truncation — though issue 07's measurement weakens this considerably: windowing a long chunk recovers the same text locally, and hosted context only helps if the *unwindowed* document is what the model needs
 2. **A pinnable version identifier**, so the variant row's provenance is as reproducible as every other number in `RESULTS.md`
 3. **Priced, with the price reported in the row** — a hosted rung that hides its cost defeats the ladder
 4. **Evidence on code retrieval**, treated as a reason to *measure* rather than as the result
@@ -97,9 +97,29 @@ The local-vs-hosted argument above stands: it rests on reproducibility, and no m
 
 The original reasoning is not worthless: 33M parameters against 596M is roughly 18× the compute over 753,421 chunks, on a laptop, re-run whenever the chunk definition changes. That constraint is real. It was also never measured, which is the actual defect — two decisions in this ADR were written to different standards of evidence, and only the revision pins were checked.
 
-**Resolved by measurement, not by a second guess.** Issue 07 benchmarks the incumbent against `bge-m3` and `Qwen3-Embedding-0.6B` on throughput, index size, peak RAM, and truncation rate, and amends this ADR with the result — confirming the pin or replacing it. It is scheduled before issue 03, so nothing is built on an unmeasured pin.
+**Resolved by measurement, not by a second guess.** Issue 07 benchmarked the incumbent against `bge-m3` and `Qwen3-Embedding-0.6B` on throughput, index size, peak RAM, and truncation. Raw results: [`data/bench/results.jsonl`](../../data/bench/results.jsonl).
 
 Left on the record rather than silently corrected: an ADR that hides having been wrong is worth less than one that shows its own correction, and this series exists to catch exactly the failure it committed.
+
+## Measured (2026-08-04) — the pin holds, for a different reason
+
+Apple M5, 25.7 GB RAM, MPS, `sentence-transformers` 5.6.1. 25,000 chunks reservoir-sampled uniformly from all 753,421 in the dev-split index; identical harness, order, and token-budgeted batching for every model.
+
+| Model | ctx | chunks/s | **full index** | index size | peak RSS | download | corpus tokens dropped |
+|---|---|---|---|---|---|---|---|
+| `bge-small-en-v1.5` | 512 | **75.7** | **2.8 h** | 1.16 GB | 0.69 GB | 0.27 GB | **59.3%** |
+| `bge-m3` | 8192 | 2.3 | 89.5 h | 3.09 GB | 2.53 GB | 4.84 GB | 25.9% |
+| `Qwen3-Embedding-0.6B` | 32768 | 0.4 | **487 h** | 3.09 GB | 1.60 GB | 2.42 GB | 3.1% |
+
+The trade is monotonic and brutal: every token of context recovered costs roughly two orders of magnitude of throughput. 487 hours is twenty days for one index, on a corpus that must be rebuilt whenever the chunk definition changes. Long context does not rescue this.
+
+**But the measurement reframes the question.** All three rows are dominated by the same 1.6% of chunks. `bge-m3` at 8192 tokens still discards a quarter of the corpus, which means the fallback chunks' tail runs far past even that — the problem is not the model's context window, it is that a whole file is being handed to a sentence encoder as one document.
+
+**The fix is to reshape the chunk, not to buy context.** Splitting each fallback into a sequence of windows sized to the model's limit preserves the text that truncation would discard, and does so at the small model's speed. Estimated: fallbacks carry ~58M tokens, which at 512 tokens per window is ~114,000 additional chunks — roughly **+13% chunk count for 0% content loss**, still inside three hours. Against that, `Qwen3-Embedding-0.6B` buys a 3.1% loss for 487 hours.
+
+**Decision: the pin holds** — `BAAI/bge-small-en-v1.5` at the revision above — but the reasoning is now measured rather than assumed, and it is **conditional on issue 06 windowing the fallback chunks instead of letting them be truncated.** Without that, the pin means discarding 59% of the corpus, which no accuracy number could survive being asked about.
+
+**One caveat, stated so it cannot flatter the result.** 75.7 chunks/s is a floor for a naive per-batch `encode()` loop with an MPS round-trip per batch, not the model's ceiling; a real indexer batching more aggressively will beat it. The comparison is sound because all three models ran the identical harness, and the 190× gap between fastest and slowest is far too large for implementation overhead to reverse. Issue 03 should not treat 2.8 hours as the achievable index time — it is an upper bound.
 
 ## Alternatives rejected
 

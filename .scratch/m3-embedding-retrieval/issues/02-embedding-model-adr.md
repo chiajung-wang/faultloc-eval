@@ -58,7 +58,7 @@ tokens now:      106,216,710
 tokens w/bodies: 302,596,012
 ```
 
-~141 tokens per chunk on average, and the distribution is heavily skewed: 5.5% of chunks are whole-file fallbacks and they carry most of the tokens.
+~141 tokens per chunk on average, and the distribution is heavily skewed: whole-file fallbacks carry most of the tokens. (The share was quoted here as 5.5% from a 40-instance probe; measured over all 753,421 chunks in [issue 07](07-embedding-model-bakeoff.md) it is **1.6% of chunks carrying 55% of the text** — the skew is sharper, not milder.)
 
 The first estimate made during this discussion was ~7M tokens — **wrong by 15×**, because it assumed a chunk was a signature plus a docstring and forgot that the fallback chunks contain entire files. The measurement changed the shape of the cost argument (a full re-index runs $19 at `voyage-code-3`, not $1.26), though not the conclusion.
 
