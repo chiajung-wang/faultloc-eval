@@ -12,9 +12,11 @@ plausible number with no valid provenance, which is worse than a crash.
 
 from __future__ import annotations
 
+import subprocess
+
 import numpy as np
 import pytest
-from conftest import Fixture
+from conftest import Fixture, git
 
 from faultloc.dataset.models import Instance
 from faultloc.embedding import (
@@ -24,6 +26,7 @@ from faultloc.embedding import (
     ModelSpec,
     build_index,
 )
+from faultloc.repos import RepoStore
 
 SPEC = ModelSpec(name="fake/model", revision="a" * 40, dimensions=4, query_prefix="q: ")
 OTHER = ModelSpec(name="fake/model", revision="a" * 40, dimensions=8, query_prefix="q: ")
@@ -161,6 +164,51 @@ class TestBuild:
 
         blobs = {f.blob for f in repo.store.list_source_files(repo.repo, repo.first)}
         assert report.blobs_embedded == len(blobs)
+
+    def test_counts_a_blob_reachable_at_two_paths_once(self, tmp_path, index) -> None:
+        """Two paths, identical contents, one blob.
+
+        The first full run reported 32,686 blobs against 32,667 files on disk:
+        a blob reachable at several paths landed in the wanted list once per
+        path. The index was correct -- it is keyed by content -- but the
+        published figure was not, and this project's figures are the product.
+        """
+        work = tmp_path / "work"
+        work.mkdir()
+        git("init", "-q", "-b", "main", cwd=work)
+        git("config", "user.email", "t@example.com", cwd=work)
+        git("config", "user.name", "Test", cwd=work)
+        (work / "one.py").write_text("def shared(): ...\n")
+        (work / "two.py").write_text("def shared(): ...\n")  # byte-identical
+        git("add", "-A", cwd=work)
+        git("commit", "-qm", "duplicate", cwd=work)
+        commit = git("rev-parse", "HEAD", cwd=work)
+
+        root = tmp_path / "repos"
+        root.mkdir()
+        subprocess.run(
+            ["git", "clone", "--bare", "-q", str(work), str(root / "acme__dup.git")],
+            check=True,
+        )
+        store = RepoStore(root=root, cache_root=tmp_path / "cache")
+        target = Instance(
+            instance_id="acme__dup-1",
+            repo="acme/dup",
+            base_commit=commit,
+            issue_text="shared is broken",
+            ground_truth_files=("one.py",),
+        )
+
+        # Built twice on purpose. On the *fresh* path `read_blobs` returns a
+        # dict and collapses the duplicate on its own, so a single run passes
+        # with or without the fix. The miscount is on the *reused* path, where
+        # nothing else deduplicates.
+        build_index([target], store=store, index=index, encode=fake_encode)
+        report = build_index([target], store=store, index=index, encode=fake_encode)
+
+        assert len(store.list_source_files("acme/dup", commit)) == 2
+        assert report.blobs_reused == 1
+        assert report.blobs_total == 1
 
     def test_reports_zero_cost_for_a_local_model(
         self, repo: Fixture, index: EmbeddingIndex

@@ -236,7 +236,10 @@ def build_index(
 
     for n, instance in enumerate(instances, 1):
         files = store.list_source_files(instance.repo, instance.base_commit)
-        wanted = [f.blob for f in files if f.blob not in seen]
+        # Deduplicated: one blob can be reachable at several paths in the same
+        # commit, and counting it twice inflates the reported blob total without
+        # affecting the index, which is keyed by content.
+        wanted = list(dict.fromkeys(f.blob for f in files if f.blob not in seen))
         if wanted:
             seen.update(wanted)
             fresh = [blob for blob in wanted if not index.has(blob)]
