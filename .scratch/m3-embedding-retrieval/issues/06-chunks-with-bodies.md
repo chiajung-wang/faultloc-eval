@@ -139,4 +139,4 @@ For issue 03 this sets the index: 1,013,340 × 384 dimensions × 4 bytes = **1.5
 
 **Second, and more interesting:** running two evaluations back-to-back cannot produce two clean entries, because **the first run's own `RESULTS.md` write dirties the tree for the second**. The check tests the working tree, and cannot distinguish "source changed" from "output file changed" — but a modified `RESULTS.md` genuinely cannot change a number, so this is a false positive.
 
-Not fixed here. Excluding the results log from the dirty check would tighten the guarantee, but loosening a provenance rule as a side effect of an unrelated issue is the wrong way to make that call. Filed as [issue 08](08-results-log-dirty-check.md).
+Not fixed, and not filed. The workaround is one `git commit` between runs, the false positive is visible rather than misleading, and excluding the results log from the check would touch the provenance guarantee — a poor trade for four minutes. Recorded here so the next person to hit it knows it is understood rather than unnoticed.
