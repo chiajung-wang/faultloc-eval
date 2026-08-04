@@ -12,6 +12,28 @@ interval is what says so.
 
 | Metric | Value |
 |---|---|
+| Top-1 | 39.8% (95% CI 33.8%-46.0%) |
+| Recall@3 | 52.0% |
+| Recall@5 | 61.3% |
+| Instances scored | 244 |
+| Wall clock | 2m 47s |
+| Cost | $0.00 ($0.0000/instance) |
+
+**Per repo** — django 113 @ 36.3% · sympy 36 @ 50.0% · sphinx 22 @ 9.1% · matplotlib 17 @ 23.5% · scikit-learn 16 @ 81.2% · xarray 11 @ 45.5% · astropy 10 @ 70.0% · pytest 10 @ 50.0% · requests 4 @ 0.0% · pylint 4 @ 25.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `903e797` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung bm25-chunks --split dev`
+
+**Read**: Chunk definition v2: windowed at 2048 chars. Supersedes the earlier bm25-chunks row, which used unwindowed chunks.
+
+## 2026-08-04 · bm25-chunks · dev
+
+| Metric | Value |
+|---|---|
 | Top-1 | 37.3% (95% CI 31.5%-43.5%) |
 | Recall@3 | 50.7% |
 | Recall@5 | 59.0% |
