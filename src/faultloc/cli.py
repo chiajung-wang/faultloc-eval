@@ -35,6 +35,7 @@ from faultloc.repos import RepoStore
 from faultloc.rungs import Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
+from faultloc.rungs.cross_encoder import CrossEncoderRung
 from faultloc.rungs.embed import EmbedRung
 from faultloc.rungs.hybrid import HybridRung
 from faultloc.scoring import score
@@ -51,6 +52,7 @@ RUNGS: dict[str, Callable[[], Rung]] = {
     "bm25-chunks-bodies": partial(Bm25ChunksRung, include_bodies=True),
     "embed": EmbedRung,
     "hybrid": HybridRung,
+    "cross-encoder": CrossEncoderRung,
 }
 DEFAULT_RESULTS = Path("RESULTS.md")
 

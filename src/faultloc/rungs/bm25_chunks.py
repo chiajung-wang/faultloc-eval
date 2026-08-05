@@ -16,6 +16,7 @@ a measurement instrument that happens to satisfy the same contract.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 
 from rank_bm25 import BM25Okapi
 
@@ -52,28 +53,91 @@ class Bm25ChunksRung:
         # can appear at several paths and a cached entry must not depend on
         # where it was first seen.
         self._chunks_by_blob: dict[str, list[list[str]]] = {}
+        # One instance's scoring, kept so `predict` and `evidence` do not each
+        # run BM25 over the repository. Rung 2.6 asks for both, in that order.
+        self._scored: tuple[Instance, tuple[str, ...], dict[str, int]] | None = None
 
     def predict(self, instance: Instance) -> Prediction:
         started = time.perf_counter()
 
+        ranked, _evidence = self._score(instance)
+        stop = StopCondition.ANSWERED if ranked else StopCondition.NO_CANDIDATES
+
+        return self._prediction(instance, ranked, stop, started)
+
+    def evidence(self, instance: Instance, paths: Sequence[str]) -> dict[str, str]:
+        """The Evidence Chunk for each path: the text the file scored as.
+
+        Chunk Aggregation scores a file as its best chunk and then keeps only
+        the number. Rung 2.6 and rung 3 show a model *why* a file is a
+        candidate, and showing it a chunk the retriever never matched on would
+        make the two rungs disagree about what a candidate is.
+
+        A path the lexical rung never ranked maps to the empty string rather
+        than raising: the dense retriever contributes to the union too, and
+        dropping its paths here would shrink the list issue 01 measured the
+        ceiling on.
+        """
+        _ranked, best = self._score(instance)
+        wanted = {path for path in paths if path in best}
+        if not wanted:
+            return dict.fromkeys(paths, "")
+
+        blobs = {
+            file.path: file.blob
+            for file in self.store.list_source_files(instance.repo, instance.base_commit)
+            if file.path in wanted
+        }
+        texts = self.store.read_blobs(instance.repo, sorted(set(blobs.values())))
+
+        found: dict[str, str] = {}
+        for path in paths:
+            source = texts.get(blobs.get(path, ""), "")
+            chunks = chunk_source(source, include_bodies=self.include_bodies) if source else ()
+            index = best.get(path, -1)
+            found[path] = chunks[index].text if 0 <= index < len(chunks) else ""
+        return found
+
+    def _score(self, instance: Instance) -> tuple[tuple[str, ...], dict[str, int]]:
+        """Ranked paths, and the index of the chunk each file scored as.
+
+        Memoised for one instance, compared by value: a memo that ignored which
+        instance it held would hand the second one the first one's evidence,
+        which is a wrong answer that looks like a working cache.
+        """
+        if self._scored is not None and self._scored[0] == instance:
+            return self._scored[1], self._scored[2]
+
+        ranked, best = self._compute(instance)
+        self._scored = (instance, ranked, best)
+        return ranked, best
+
+    def _compute(self, instance: Instance) -> tuple[tuple[str, ...], dict[str, int]]:
         files = self.store.list_source_files(instance.repo, instance.base_commit)
         if not files:
-            return self._prediction(instance, (), StopCondition.NO_CANDIDATES, started)
+            return (), {}
 
         documents: list[list[str]] = []
         owners: list[str] = []
-        for path, tokens in self._documents(instance.repo, files):
+        positions: list[int] = []
+        for path, position, tokens in self._documents(instance.repo, files):
             documents.append(tokens)
             owners.append(path)
+            positions.append(position)
 
         if not documents:
-            return self._prediction(instance, (), StopCondition.NO_CANDIDATES, started)
+            return (), {}
 
         scores = BM25Okapi(documents).get_scores(tokenize(instance.issue_text))
 
         by_file: dict[str, list[float]] = {}
-        for path, score in zip(owners, scores, strict=True):
+        best: dict[str, tuple[float, int]] = {}
+        for path, position, score in zip(owners, positions, scores, strict=True):
             by_file.setdefault(path, []).append(score)
+            # Ties keep the earlier chunk, so the Evidence Chunk is as
+            # deterministic as the ranking it accompanies.
+            if path not in best or score > best[path][0]:
+                best[path] = (score, position)
 
         # Aggregate first, then sort. Ties break by path, as at rung 1: without
         # it the order would follow git's enumeration and determinism would hold
@@ -83,26 +147,30 @@ class Bm25ChunksRung:
             key=lambda pair: (-pair[1], pair[0]),
         )
 
-        return self._prediction(
-            instance,
+        return (
             tuple(path for path, _score in ranked),
-            StopCondition.ANSWERED,
-            started,
+            {path: position for path, (_score, position) in best.items()},
         )
 
-    def _documents(self, repo: str, files: tuple) -> list[tuple[str, list[str]]]:
-        """One (path, tokens) pair per chunk, reusing work across identical files."""
+    def _documents(self, repo: str, files: tuple) -> list[tuple[str, int, list[str]]]:
+        """One (path, chunk position, tokens) triple per chunk, reusing work
+        across identical files.
+
+        The position indexes into `chunk_source`'s output for that file, which
+        is deterministic, so it is enough to recover the Evidence Chunk's text
+        later without holding the whole corpus in memory.
+        """
         wanted = [f.blob for f in files if f.blob not in self._chunks_by_blob]
         if wanted:
             for blob, text in self.store.read_blobs(repo, wanted).items():
                 chunks = chunk_source(text, include_bodies=self.include_bodies)
                 self._chunks_by_blob[blob] = [tokenize(c.text) for c in chunks]
 
-        documents: list[tuple[str, list[str]]] = []
+        documents: list[tuple[str, int, list[str]]] = []
         for file in files:
             path_tokens = tokenize_path(file.path)
-            for chunk_tokens in self._chunks_by_blob.get(file.blob, []):
-                documents.append((file.path, path_tokens + chunk_tokens))
+            for position, chunk_tokens in enumerate(self._chunks_by_blob.get(file.blob, [])):
+                documents.append((file.path, position, path_tokens + chunk_tokens))
         return documents
 
     def _prediction(
