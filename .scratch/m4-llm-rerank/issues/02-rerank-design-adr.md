@@ -1,6 +1,6 @@
 # 02 — ADR-0008: rerank design, budget, and determinism
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -25,13 +25,13 @@ This decides what a rung-3 entry in the results log asserts, which is why it is 
 
 ## Acceptance criteria
 
-- [ ] `docs/adr/0008-llm-rerank.md` in the existing ADR format, with rationale and rejected alternatives
-- [ ] The determinism decision stated, with what a rung-3 `RESULTS.md` entry does and does not assert under it
-- [ ] Prompt content decided, with the token cost of each option estimated from issue 01's chosen K
-- [ ] Models named with a stated reason each, and pinned by exact model ID
-- [ ] Expected dev-split cost per model, and a hard spend cap
-- [ ] A revisit condition, as ADR-0007 has
-- [ ] `CONTEXT.md` updated if the decision introduces or renames domain language
+- [x] `docs/adr/0008-llm-rerank.md` in the existing ADR format, with rationale and rejected alternatives
+- [x] The determinism decision stated, with what a rung-3 `RESULTS.md` entry does and does not assert under it
+- [x] Prompt content decided, with the token cost of each option estimated from issue 01's chosen K
+- [x] Models named with a stated reason each, and pinned by exact model ID
+- [x] Expected dev-split cost per model, and a hard spend cap
+- [x] A revisit condition, as ADR-0007 has
+- [x] `CONTEXT.md` updated if the decision introduces or renames domain language
 
 ## Notes
 
@@ -44,3 +44,31 @@ Worth deciding here rather than discovering later: whether the model returns a r
 ## Blocked by
 
 - [01 — The union candidate set and its recall ceiling](01-union-recall-ceiling.md) — sets K, which sets the token count, which sets the budget
+
+## Comments
+
+**Closed 2026-08-05.** [ADR-0008](../../../docs/adr/0008-llm-rerank.md) landed. Four decisions, one term added to `CONTEXT.md` (**Evidence Chunk**), no money spent yet.
+
+Prompt size was measured before the model was chosen, which turned out to be the right order: [`scripts/prompt_token_cost.py`](../../../scripts/prompt_token_cost.py) shows the issue text is 420 tokens against 4,286 for twenty candidates' body chunks. **The payload, not the model, is what the budget binds on** — paths-only fits every model on the price list, body chunks fit only the cheap tier.
+
+| Decision | Settled as |
+|---|---|
+| Provider | Together, `init_chat_model(model_provider="together")` |
+| Models | `deepseek-ai/DeepSeek-V4-Flash-0731`, `MiniMaxAI/MiniMax-M3` |
+| Payload | path + Evidence Chunk, K=20, 1.19 M input tokens/run |
+| Output | full reordering of 20 |
+| Thinking mode | measured, not chosen — 2 models × on/off = 4 runs, $1.92 |
+| Determinism | **dropped.** Single sampled run, variance unmeasured, stated in the entry |
+| Budget | $1.50/run hard cap, $5.00 milestone; supersedes the PRD's $0.50 |
+
+### Two things the ADR settles that the issue did not ask about
+
+**Which of the four runs is the ladder's rung-3 row** — declared in advance as Flash/thinking-on, so the headline cannot be whichever run wins. The issue's "which models, and why those" question quietly assumed one run per model.
+
+**The `test_is_deterministic` assertion is dropped rather than satisfied.** Both mechanisms on offer would have let the word "deterministic" stand while meaning something weaker — a replay of a committed cache, or `temperature=0`, which thinking-on models ignore outright per DeepSeek's API docs.
+
+### What went unresolved
+
+The **2,000 thinking-tokens-per-instance estimate is a guess**, and every cost in the table moves with it. It is the one number in the ADR that was not measured or checked against a source. The $1.50 cap is what makes it safe to guess; issue 03's first run replaces it.
+
+**No variance repeats are budgeted.** At n=244 the ±6pp Wilson interval would swallow any run-to-run variance under ~2pp, so repeats were expected to be uninformative — but that is a prediction, not a measurement, and it becomes load-bearing if rung 3's delta over rung 2.5 is small. Second known measurement gap, alongside Recall@k's missing interval.

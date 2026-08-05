@@ -99,6 +99,14 @@ The rule turning many chunk scores into one file score: **a file scores as its b
 
 Every chunk-indexed system shares this rule. Two of them aggregating differently would make the delta between them measure aggregation rather than the variable under test.
 
+## Evidence Chunk
+
+The chunk a file scored as under Chunk Aggregation, shown to a model as that candidate's evidence.
+
+Chunk Aggregation already computes it and then discards it, keeping only the score. Naming it is what lets rung 3 show a model *why* a file is in the Candidate Set, rather than a fresh excerpt the retriever never looked at — two rungs disagreeing about what a candidate is would make their delta unreadable.
+
+Mean 214 tokens against 6,735 for the whole file (ADR-0008), which is the difference between a rung that costs a dollar and one that costs forty.
+
 ## Prediction
 
 A rung's output for one Instance: a ranked list of file paths plus a **Confidence**.
