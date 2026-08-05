@@ -8,6 +8,28 @@ Top-1 is reported with a 95% Wilson interval. At these sample sizes a small
 difference between two rungs or two repositories is not yet a result, and the
 interval is what says so.
 
+## 2026-08-05 · cross-encoder · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 26.6% (95% CI 21.5%-32.5%) |
+| Recall@3 | 42.8% |
+| Recall@5 | 52.6% |
+| Instances scored | 244 |
+| Wall clock | 61m 12s |
+| Cost | $0.00 ($0.0000/instance) |
+
+**Per repo** — django 113 @ 26.5% · sympy 36 @ 30.6% · sphinx 22 @ 18.2% · matplotlib 17 @ 52.9% · scikit-learn 16 @ 18.8% · xarray 11 @ 18.2% · astropy 10 @ 20.0% · pytest 10 @ 10.0% · requests 4 @ 50.0% · pylint 4 @ 25.0% · other 1 @ 0.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `89da23c` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung cross-encoder --split dev`
+
+**Read**: _(not recorded)_
+
 ## 2026-08-05 · hybrid · dev
 
 | Metric | Value |
