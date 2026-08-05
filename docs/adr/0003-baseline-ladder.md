@@ -17,6 +17,10 @@ Four rungs, each evaluated independently on the same Instances, each reported wi
 
 A rung's reported value is its **delta over the rung below**, priced.
 
+*Amended 2026-08-05: two rungs inserted, numbered 2.5 (Hybrid — rank fusion of rungs 1 and 2) and 2.6 (Cross-encoder rerank). Decimals rather than renumbering, so every existing reference to "rung 3" and "rung 4" — including the M4 and M5 milestone definitions — stays valid. See `CONTEXT.md`.*
+
+*The delta rule above is what forced the insertions. Rung 2.5 arrived by accident and outscored both rungs it merges, so crediting rung 3 with a delta over rung 2 would have attributed a free gain to a paid system. Rung 2.6 is inserted for the same reason before it is built: a model that reads issue and candidate together is a different mechanism from one that reasons in natural language, and stacking them without measuring the middle would make rung 3's delta unattributable.*
+
 ## Rationale
 
 **The comparison is the deliverable.** "Agent reaches 0.51" is unanchored. "Agent 0.51 vs rerank 0.44 vs embeddings 0.38 vs BM25 0.29, at six times the cost and forty times the latency" is an engineering result — and it demonstrates knowing when an agent is *not* worth deploying.

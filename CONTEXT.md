@@ -42,14 +42,40 @@ The proportion of raw candidates the Instance Filter rejects, reported per drop 
 
 ## Rung
 
-One system on the ladder, each measured independently on the same Instances:
+One system on the ladder that produces a ranked answer for an Instance, measured on the same Instances as every other and reported with its accuracy, cost, and latency.
 
-1. **BM25** — lexical retrieval over file contents, no LLM
-2. **Embedding retrieval** — dense retrieval over AST Chunks
-3. **LLM rerank** — model reorders rung-2 candidates
-4. **Agent** — tool-using loop over the repository
+| # | Rung | What it adds over the rung below |
+|---|---|---|
+| 1 | **BM25** | lexical retrieval over file contents, no model |
+| 2 | **Embedding retrieval** | dense retrieval over AST Chunks |
+| 2.5 | **Hybrid** | rank fusion of rungs 1 and 2 — no model, no new signal, just agreement |
+| 2.6 | **Cross-encoder rerank** | a model that reads the issue and a candidate *together*, rather than embedding each alone |
+| 3 | **LLM rerank** | a model that reasons about the Candidate Set in natural language |
+| 4 | **Agent** | a tool-using loop that can go looking for what retrieval missed |
 
-A rung's value is the delta it adds over the rung below, at its cost and latency.
+A rung's value is the delta it adds over the rung below, at its cost and latency. That rule is what makes the numbering load-bearing rather than decorative: inserting a system between two rungs changes what the rung above it is being credited with.
+
+**Decimals rather than renumbering.** [ADR-0003](docs/adr/0003-baseline-ladder.md) fixed four rungs before any existed. Rungs 2.5 and 2.6 were inserted afterwards, and renumbering would silently invalidate every reference to "rung 3" and "rung 4" — including two milestone definitions. The decimals are honest about having been added later.
+
+Rung 2.5 arrived by accident: it was built as the Candidate Set's merge step and turned out to score above both rungs it merges.
+
+## Ablation
+
+A system built to isolate one variable, published alongside the Rungs and never shipped. It answers *which half of a change did the work*, which a Rung's own number cannot.
+
+`bm25-chunks` and `bm25-chunks-bodies` differ from rung 1 only in what counts as a document. That is how M3 established that indexing function bodies — not chunking — was what moved the number, and that reporting rung 2's delta over rung 1 alone would have credited a model with a gain a free change produced.
+
+An Ablation appears in `RESULTS.md` with the same provenance as a Rung. It does not appear in the ladder.
+
+## Candidate Set
+
+The ranked, truncated list of files a downstream rung is handed. Infrastructure, not a rung — it produces no answer of its own.
+
+Judged by **hit@K**: the share of Instances whose list contains at least one Ground-Truth File. That is the hard ceiling on any system reranking it, since a reranker reorders and never adds.
+
+Distinct from Recall@k, which is the *share* of an Instance's ground-truth files found. hit@K bounds Top-1; Recall@k bounds Recall@k.
+
+The same code produces rung 2.5 and the Candidate Set, and the two are judged by different metrics — Top-1 at K=1 against hit@K at K=20. Tuning for one does not necessarily help the other, so the roles are named separately.
 
 ## AST Chunk
 
