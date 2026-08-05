@@ -1,6 +1,6 @@
 # ADR-0008: Rung 3 reranks with a served open-weights model, and stops claiming determinism
 
-**Status:** Accepted · 2026-08-05 · *amended the same day: the provider is OpenRouter, one model changed, and the reasoning axis is not symmetric. See [the amendment](#amended-2026-08-05--wrong-provider-and-a-pair-that-could-not-have-told-us-anything). No run has been paid for yet; every cost below is an estimate with its assumption named.*
+**Status:** Accepted · 2026-08-05 · *amended twice the same day: the provider is OpenRouter, both models changed, the reasoning axis is not symmetric, and the upstream serve must be pinned because it varies in quantization. See [the first](#amended-2026-08-05--wrong-provider-and-a-pair-that-could-not-have-told-us-anything) and [second](#amended-again-2026-08-05--the-strong-row-is-deepseek-and-a-model-id-does-not-determine-the-number) amendments. No run has been paid for yet; every cost below is an estimate with its assumption named.*
 
 ## Context
 
@@ -171,3 +171,73 @@ The original design ran two models × thinking {on, off} — one variable per pa
 **The prompt, the payload, K=20, the full reordering, and the dropped determinism claim are all unaffected.** None of them depended on the provider or on which two models were named.
 
 **One thing this amendment does not fix.** Both models' headline scores come from SWE-bench Verified — the benchmark this project evaluates on. A model advertising 80% there has been measured against, and plausibly tuned near, the dev split's instances. That is not evidence about rung 3 and it is not independent of the number this milestone will publish. `CONTEXT.md` names Contamination and M6's Fresh Set exists for exactly this; until then a rung-3 result on this split carries the asterisk.
+
+## Amended again 2026-08-05 — the strong row is DeepSeek, and a model ID does not determine the number
+
+Two changes, one of them affecting every future entry in this project that calls a hosted model.
+
+### MiniMax-M3 out, DeepSeek-V4-Pro in
+
+Directed after the first amendment, and it holds up on this ADR's own criteria. `deepseek-ai/DeepSeek-V4-Pro` is **MIT**, weights published, Hub revision `b5968e9190ef`. Against `openai/gpt-oss-120b` at $0.037 it spans **11.8×** on input — wider than the MiniMax pairing it replaces, so the cross-model table keeps the property the first amendment bought it.
+
+| Role | Model | in / out per 1M | licence | context |
+|---|---|---|---|---|
+| cheap | `openai/gpt-oss-120b` | $0.037 / $0.17 | Apache-2.0 | 131,072 |
+| strong | `deepseek/deepseek-v4-pro` | $0.435 / $0.87 | MIT | 1,048,576 |
+
+Routes pinned: `deepinfra/bf16` for gpt-oss (full precision, and the endpoint whose price this table quotes), `deepseek` first-party for DeepSeek. Both verified to answer, and both verified to honour their reasoning controls, before any run was budgeted.
+
+`deepseek/deepseek-v4-flash-0731` — the model the original ADR pinned — was reconsidered for the strong row and rejected at $0.090: only 2.4× gpt-oss, which is the narrow-pair mistake the first amendment exists to correct.
+
+Estimated total moves from $1.62 to **$1.75**: gpt-oss $0.06 low / $0.14 high, DeepSeek $0.56 off / $0.99 on. The $1.50 per-run cap still clears the most expensive cell.
+
+### The provider must be pinned, and the entry must record it
+
+**This is the part that outlives the model choice.** Smoke testing found that `deepseek/deepseek-v4-pro` is served through twelve upstream providers priced $0.435–$1.68 per 1M input, and that **the quantization differs between them** — fp8, fp4, bf16, unknown. `gpt-oss-120b` is the same: CoreWeave serves fp4, DeepInfra serves bf16, and the $0.037 this ADR quotes is DeepInfra's.
+
+Two of four probe calls were routed to different providers and differed 6× in cost for one prompt.
+
+So an unpinned request has neither a fixed price nor fixed weights precision. **A rung-3 row identified only by model ID would name something that does not determine the number it reports.** ADR-0007 concluded that a model name is not provenance and pinned a revision in response; this is the same failure one level lower, where name *and* revision are still insufficient because the serve is a third variable.
+
+The decision: rung 3 sends explicit routing and records what it received.
+
+```json
+"provider": {"only": ["deepseek"], "allow_fallbacks": false}
+```
+
+`only` rather than `order`, and the value is the endpoint's **`tag`** from `/api/v1/models/{id}/endpoints` — not its display name. `{"order": ["DeepSeek"]}` returns a 404 with no indication that the provider name was the problem, which is a cheap mistake to make and an expensive one to make silently.
+
+The response's `provider` field is written into the `RESULTS.md` entry beside the model ID and revision. Fallbacks are disabled rather than ordered-with-fallback: a silent reroute mid-run would mix two serves inside one number, which is worse than a failed run.
+
+**The route also decides whether reasoning happens at all**, which is the finding that makes pinning non-optional rather than tidy. On the same model and the same prompt:
+
+| Route | quant | reasoning tokens, default | cost |
+|---|---|---|---|
+| `deepseek` (first-party) | unknown | **154** | $0.000154 |
+| `streamlake/fp8` | fp8 | **131** | $0.000203 |
+| `digitalocean` | unknown | **0** | $0.000041 |
+
+DigitalOcean's serve does no reasoning even with reasoning left at its default. An unpinned run would therefore sample a mixture of serves, some of which silently opt out of the variable the ablation is trying to measure — producing a "reasoning doesn't help" result that is an artefact of routing.
+
+**Consequence worth stating.** This narrows what "reproducible" means for rung 3 further than the original ADR admitted. The entry already said variance is unmeasured; it must now also say *which serve produced it*, because a reader routing to a different provider gets different weights, not merely a different sample.
+
+### A wrong conclusion, and what corrected it
+
+An earlier draft of this amendment recorded that `deepseek-v4-pro`'s reasoning toggle was **unverifiable** — every unpinned probe reported zero reasoning tokens, including at its default, so the ablation looked unmeasurable on one side.
+
+That was wrong, and wrong for the reason this amendment is about. The unpinned probes were landing on DigitalOcean's serve, which does no reasoning. Pinned to the first-party route the toggle is unambiguous:
+
+| | reasoning tokens | completion | cost |
+|---|---|---|---|
+| default | **154** | 158 | $0.000154 |
+| `reasoning: {enabled: false}` | **0** | 3 | $0.0000196 |
+
+A 7.9× cost difference and a clean on/off. The ablation is fully measurable.
+
+Kept on the record rather than deleted because the mistake is the argument: a conclusion about a *model* was actually a property of an unpinned *route*, and it took pinning the provider to tell them apart. That is the same confusion in miniature that this amendment exists to prevent at the scale of a published number.
+
+### The first-party route required an account change
+
+`{"only": ["deepseek"]}` initially failed with *"No endpoints available matching your guardrail restrictions and data policy"*. OpenRouter filters routing by an account-level toggle for providers that may train on prompts, and DeepSeek's first-party endpoint falls outside the default. The setting was changed deliberately, on the basis that this project sends only SWE-bench issue text and code from public repositories.
+
+Worth recording because it is a **reproducibility precondition that lives outside the repository**. A third party with the pinned model, revision, provider tag and this commit still cannot reproduce a rung-3 row without the matching account setting, and no amount of pinning inside the codebase can express that.
