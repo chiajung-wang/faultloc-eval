@@ -7,6 +7,8 @@ results. Logic lives in the package, so it stays testable without a subprocess.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +17,12 @@ import typer
 from faultloc import __version__
 from faultloc.dataset.splits import load_splits
 from faultloc.dataset.verified import DATASET_ID, DATASET_REVISION, load_verified_set
+from faultloc.embedding import (
+    DEFAULT_INDEX_ROOT,
+    EmbeddingIndex,
+    build_index,
+    load_encoder,
+)
 from faultloc.reporting import (
     Provenance,
     code_version,
@@ -23,7 +31,11 @@ from faultloc.reporting import (
     render_terminal,
     today,
 )
+from faultloc.repos import RepoStore
+from faultloc.rungs import Rung
 from faultloc.rungs.bm25 import Bm25Rung
+from faultloc.rungs.bm25_chunks import Bm25ChunksRung
+from faultloc.rungs.embed import EmbedRung
 from faultloc.scoring import score
 
 app = typer.Typer(
@@ -32,7 +44,12 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-RUNGS = {"bm25": Bm25Rung}
+RUNGS: dict[str, Callable[[], Rung]] = {
+    "bm25": Bm25Rung,
+    "bm25-chunks": Bm25ChunksRung,
+    "bm25-chunks-bodies": partial(Bm25ChunksRung, include_bodies=True),
+    "embed": EmbedRung,
+}
 DEFAULT_RESULTS = Path("RESULTS.md")
 
 
@@ -43,8 +60,61 @@ def version() -> None:
 
 
 @app.command()
+def index(
+    split: Annotated[str, typer.Option(help="Dataset split: dev | test")] = "dev",
+    limit: Annotated[int, typer.Option(help="Index only the first N instances; 0 = all.")] = 0,
+    root: Annotated[Path, typer.Option(help="Where the index lives.")] = DEFAULT_INDEX_ROOT,
+    device: Annotated[str, typer.Option(help="torch device; blank to auto-detect.")] = "",
+) -> None:
+    """Embed every AST Chunk a split needs, skipping blobs already indexed.
+
+    Separate from ``evaluate`` on purpose: this is a long, resumable, costed
+    job, and a rung that rebuilt its index inside the prediction loop is the
+    bug M1 already found once. Re-running is near-free -- blobs are keyed by
+    content hash, so only new content is embedded.
+    """
+    loaded = load_verified_set()
+    splits = load_splits()
+    instances = splits.select(loaded.instances, split)
+    if not instances:
+        raise typer.BadParameter(f"split {split!r} selected no instances")
+    if limit:
+        instances = instances[:limit]
+
+    store = EmbeddingIndex(root=root)
+    typer.echo(f"Indexing {len(instances)} instances into {store.root}")
+    typer.echo(f"  model {store.spec.name} @ {store.spec.revision[:12]}")
+
+    def progress(done: int, total: int) -> None:
+        if done % 25 == 0 or done == total:
+            typer.echo(f"  ... {done}/{total} instances", nl=True)
+
+    report = build_index(
+        instances,
+        store=RepoStore(),
+        index=store,
+        encode=load_encoder(store.spec, device=device or None),
+        on_progress=progress,
+    )
+
+    typer.echo(
+        f"\n  blobs       {report.blobs_total:,} "
+        f"({report.blobs_embedded:,} embedded, {report.blobs_reused:,} reused)"
+    )
+    typer.echo(f"  chunks      {report.chunks_embedded:,} embedded")
+    typer.echo(f"  index size  {store.size_bytes() / 1e9:.2f} GB")
+    typer.echo(f"  wall clock  {report.wall_clock_s / 60:.1f}m")
+    typer.echo(f"  cost        ${report.cost_usd:.2f}")
+
+
+@app.command()
 def evaluate(
-    rung: Annotated[str, typer.Option(help="Which rung: bm25 | embed | rerank | agent")] = "bm25",
+    rung: Annotated[
+        str,
+        typer.Option(
+            help="Which rung: bm25 | bm25-chunks | bm25-chunks-bodies | embed | rerank | agent"
+        ),
+    ] = "bm25",
     split: Annotated[str, typer.Option(help="Dataset split: dev | test")] = "dev",
     limit: Annotated[int, typer.Option(help="Evaluate only the first N instances; 0 = all.")] = 0,
     note: Annotated[str, typer.Option(help="One line for the log: what the number means.")] = "",
@@ -53,7 +123,9 @@ def evaluate(
 ) -> None:
     """Run a rung against a split and report Top-1, Recall@3, Recall@5, cost, latency.
 
-    M1 implements the ``bm25`` rung only.
+    ``bm25-chunks`` is the ablation, not a rung of the ladder: it isolates the
+    chunking half of rung 2's change so the embedding half can be priced on its
+    own. See the M3 PRD.
     """
     if rung not in RUNGS:
         raise typer.BadParameter(f"unknown rung {rung!r}; available: {', '.join(sorted(RUNGS))}")
