@@ -22,7 +22,7 @@ Three numbers govern what may be claimed, and all three must appear:
 
 - [ ] README ladder table carries the rung-3 row with Top-1 + interval, Recall@3, Recall@5, cost per instance, latency
 - [ ] Cross-model table published, with what is and is not established stated explicitly
-- [ ] Delta reported against both rung 2 and the best lexical row, each named
+- [ ] Delta reported against rung 2.6, rung 2, and the best lexical row, each named — 2.6 is the rung directly below, so it is the one the ladder's rule credits against
 - [ ] The union recall ceiling stated, and rung 3's distance from it
 - [ ] Total money spent across the milestone reported — this is the first milestone with a bill
 - [ ] Every figure traces to a `RESULTS.md` entry, checked by string match
@@ -41,3 +41,4 @@ Carried into M5 so it is not forgotten: the rung-3 failure-mode counts from issu
 
 - [03 — Rung 3 end to end, one model](03-rerank-rung.md)
 - [04 — Cross-model comparison table](04-cross-model-table.md)
+- [06 — Rung 2.6, a cross-encoder between fusion and the LLM](06-cross-encoder-rung.md) — rung 3's delta is measured over the rung below it, and until 2.6 is scored that row does not exist
