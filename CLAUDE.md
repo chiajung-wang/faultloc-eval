@@ -4,19 +4,70 @@ Fault localization from issue reports — given a bug report, predict which sour
 
 **The evidence is half the deliverable.** Anyone can wire an LLM to a repository; the claim here is knowing whether it works and when it doesn't. That is why the rules below have teeth.
 
+---
+
+# How to work
+
+These bias toward caution over speed. For trivial tasks, use judgement.
+
 ## Never state external facts from memory
 
 **Search before naming any model, price, capability ranking, availability, or library API.** Training data goes stale; this repo's ADRs are decisions made against it.
 
 If a search is unavailable or fails, write *"I believe X — unverified"*. Never present a recalled fact as a recommendation.
 
-This rule exists because it was broken three times in one session: a model named in ADR-0007 whose stated justification had already stopped holding; a pinned model never compared against current alternatives, which hid a 59% corpus loss behind a documented "accepted consequence"; and a capability ranking asserted that was smaller than this project's own confidence interval. Each arrived wrapped in a recommendation table, which made it harder to spot than a hedge would have been.
+This rule exists because it was broken three times in one session: a model named in ADR-0007 whose stated justification had already stopped holding; a pinned model never compared against current alternatives, which hid a 59% corpus loss behind a documented "accepted consequence"; and a capability ranking asserted that was smaller than this project's own confidence interval. Each arrived wrapped in a recommendation table, which made it harder to spot than a hedge would have been and pushed the verification cost onto the reader.
 
-## Non-negotiables
+## Think before coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+- State assumptions explicitly. If uncertain, ask.
+- Multiple interpretations exist → present them, don't pick one silently.
+- A simpler approach exists → say so. Push back when warranted.
+- Something is unclear → stop, name what's confusing, ask.
+
+## Simplicity first
+
+Minimum code that solves the problem. Nothing speculative.
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No flexibility or configurability that wasn't requested.
+- No error handling for scenarios that cannot happen.
+- 200 lines that could be 50 → rewrite it.
+
+The test: would a senior engineer call this overcomplicated?
+
+## Surgical changes
+
+Touch only what you must. Clean up only your own mess.
+
+- Don't improve adjacent code, comments, or formatting.
+- Don't refactor what isn't broken.
+- Match existing style, even where you'd do it differently.
+- Notice unrelated dead code → mention it, don't delete it.
+- Remove imports and helpers that *your* change orphaned.
+
+The test: every changed line traces directly to the request.
+
+## Goal-driven execution
+
+Turn the task into something verifiable, then loop until it verifies.
+
+- "Add validation" → write tests for invalid inputs, make them pass
+- "Fix the bug" → write a test that reproduces it, make it pass
+- "Refactor X" → tests pass before and after
+
+For multi-step work, state the plan with its checks — `step → verify` — so the loop can run without constant clarification. Weak criteria ("make it work") guarantee rework.
+
+---
+
+# Non-negotiables
 
 **Every published number traces to a `RESULTS.md` entry**, emitted by the run itself. Never type a figure by hand — check README figures against the log by string match, not by eye. That has caught real errors.
 
-**Never publish from a dirty tree.** `code_version` suffixes the SHA with `-dirty` and the entry carries a warning. Discard the run, commit, re-run. A number produced from a tree matching no commit is worse than none, because it looks trustworthy.
+**Never publish from a dirty tree.** `code_version` suffixes the SHA with `-dirty` and the entry carries a warning. Discard the run, commit, re-run. A number from a tree matching no commit is worse than none, because it looks trustworthy.
 
 **Cost and latency sit beside every accuracy figure**, always, including when cost is `$0.00`.
 
@@ -30,9 +81,11 @@ This rule exists because it was broken three times in one session: a model named
 
 **Corrections are recorded, not edited away.** Overturned predictions and wrong ADR reasoning stay on the record with the correction beside them. A wrong prediction that measurement overturned is better evidence of a working method than one that happened to be right.
 
-**A test you did not watch fail is not evidence.** Three near-vacuous tests shipped in this repo before being caught — each passed with *and* without the fix it claimed to verify. Stash the fix, watch the test fail, restore it.
+**A test you did not watch fail is not evidence.** Three near-vacuous tests shipped here before being caught — each passed with *and* without the fix it claimed to verify. Stash the fix, watch the test fail, restore it.
 
-## Commands
+---
+
+# Commands
 
 ```bash
 uv run pytest                                    # ~290 tests
@@ -45,7 +98,7 @@ Rungs: `bm25`, `bm25-chunks`, `bm25-chunks-bodies`, `embed`, `hybrid`.
 
 `--limit` refuses to write a results entry — a truncated run is scored on a different instance set.
 
-## Layout
+# Layout
 
 | Path | What |
 |---|---|
@@ -60,15 +113,15 @@ Rungs: `bm25`, `bm25-chunks`, `bm25-chunks-bodies`, `embed`, `hybrid`.
 
 Embedding support is an optional extra: `uv sync --extra embed` (torch, sentence-transformers). Rung 1 must stay runnable without it.
 
-## Gotchas learned the hard way
+# Gotchas learned the hard way
 
 - **A run's own `RESULTS.md` write dirties the tree for the next run.** Two evaluations back-to-back can never both be clean — commit between them.
-- **The index is gitignored, content-keyed, and takes ~2.5 hours.** It survives chunk-definition changes only if the content is unchanged; changing what a chunk contains invalidates all of it.
+- **The index is gitignored, content-keyed, and takes ~2.5 hours.** Changing what a chunk contains invalidates all of it.
 - **zsh does not word-split unquoted expansions.** `set -- $spec` in a loop passes the whole string as one argument.
 - **`np.save` appends `.npy`** to a path lacking it, which breaks write-then-rename unless you pass a file handle.
 - **Piping a long-running command through `grep` buffers its progress output.** Track progress another way or drop the pipe.
 
-## Agent skills
+# Agent skills
 
 **Issue tracker** — issues live as markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
 
