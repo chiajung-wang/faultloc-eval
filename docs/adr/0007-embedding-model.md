@@ -39,6 +39,16 @@ Chunk embeddings are cached keyed by **blob SHA**, matching the tree cache in `R
 
 **Reproducibility is the constraint that decides this.** Every entry in `RESULTS.md` claims a reader can regenerate the number from a commit, a dataset revision, and a split seed. A hosted model breaks that twice: reproduction requires someone else's API key, and the weights behind a stable model name can change with no revision to pin. That is precisely the failure ADR-0006 pins the dataset revision to prevent — an input that moves a number with nobody noticing.
 
+> **Amended 2026-08-05 — this paragraph conflates two independent things, and the error excluded a real option.**
+>
+> *Hosted* and *proprietary* are different axes. Reproducibility comes from **execution**; auditability comes from **weights**.
+>
+> The second half of the argument above — weights changing under a stable name — applies only to **proprietary** hosting. An open-weights model served by an inference provider and pinned to a published revision does not have that problem: the artifact is public, and a third party with the hardware can verify it. The first half, needing an API key, still applies.
+>
+> So this ADR rejected "hosted" as a category using an argument that defeats only part of it, and **open-weights hosted embeddings were never considered.** That matters more than a wording fix, because issue 07's central finding was a *throughput* wall: `Qwen3-Embedding-0.6B` scored a 3.1% truncation loss against `bge-small`'s 59%, and was rejected at 487 hours to index locally. **That 487 hours is a property of local execution, not of the model.** Served, the same auditable weights would have been practical.
+>
+> The decision is not reversed here — `bge-small` is measured, built, and the numbers stand — but the reasoning behind it was narrower than stated, and the revisit condition below now has a concrete target rather than a category.
+
 **Cost does not decide it, but no longer argues against it.** At list prices a full dev-split index runs roughly $2 (OpenAI `text-embedding-3-small`) to $19 (`voyage-code-3`) as chunks are defined today, and $6 to $54 if issue 06 puts bodies back. Modest — but the test split adds ~50% more instances at M7, a chunk-definition change invalidates the blob cache wholesale rather than incrementally, and any second model for comparison doubles it again. Local is $0 across all of those.
 
 **Why this model rather than a larger or a code-specialised one.**
@@ -75,6 +85,8 @@ If rung 2 fails to beat rung 1 *and* issue 06 shows that indexing bodies is what
 2. **A pinnable version identifier**, so the variant row's provenance is as reproducible as every other number in `RESULTS.md`
 3. **Priced, with the price reported in the row** — a hosted rung that hides its cost defeats the ladder
 4. **Evidence on code retrieval**, treated as a reason to *measure* rather than as the result
+
+**Prefer open weights, served.** Following the amendment above, this is the cell the original reasoning skipped: public, revision-pinnable weights removes criterion 2's exposure entirely, while hosted execution removes the throughput wall that decided against every strong model in issue 07's bake-off. The cheapest concrete revisit is `Qwen3-Embedding-0.6B` — already measured here at a 3.1% truncation loss against `bge-small`'s 59%, and rejected only on 487 hours of local indexing.
 
 Criterion 4 needs stating plainly: this project measures its own Top-1 on its own instances. A vendor's benchmark claim decides which model is worth one run, never what the number is.
 
