@@ -8,6 +8,28 @@ Top-1 is reported with a 95% Wilson interval. At these sample sizes a small
 difference between two rungs or two repositories is not yet a result, and the
 interval is what says so.
 
+## 2026-08-05 · hybrid · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 45.5% (95% CI 39.4%-51.8%) |
+| Recall@3 | 65.2% |
+| Recall@5 | 73.1% |
+| Instances scored | 244 |
+| Wall clock | 4m 10s |
+| Cost | $0.00 ($0.0000/instance) |
+
+**Per repo** — django 113 @ 41.6% · sympy 36 @ 41.7% · sphinx 22 @ 36.4% · matplotlib 17 @ 47.1% · scikit-learn 16 @ 68.8% · xarray 11 @ 45.5% · astropy 10 @ 80.0% · pytest 10 @ 60.0% · requests 4 @ 25.0% · pylint 4 @ 25.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `0f3389b` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung hybrid --split dev`
+
+**Read**: Rank fusion of the lexical and dense rungs, no model. The comparison point rung 3 must beat.
+
 ## 2026-08-04 · embed · dev
 
 | Metric | Value |

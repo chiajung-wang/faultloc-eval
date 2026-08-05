@@ -89,7 +89,24 @@ The union beats the better single retriever by +3.7pp at K=20 and +5.3pp at K=5.
 
 `union (rrf)` at K=1 is **45.5%**, above both rungs it merges (43.9% lexical, 43.0% dense). A free method, no model, ahead of everything in the project.
 
-That is outside this issue's scope but too consequential to leave as a note, so the `hybrid` rung was added and is being scored with intervals. It changes rung 3's comparison point: reranking has to beat *fusion*, not rung 2, or the model is credited with a gain that reciprocal rank fusion produced for nothing.
+That is outside this issue's scope but too consequential to leave as a note, so the `hybrid` rung was added and scored. It changes rung 3's comparison point: reranking has to beat *fusion*, not rung 2, or the model is credited with a gain that reciprocal rank fusion produced for nothing.
+
+**Scored at code `0f3389b`, and it is the best row in the project:**
+
+| Row | Top-1 | Recall@3 | Recall@5 | Cost |
+|---|---|---|---|---|
+| `bm25` whole file | 39.3% (33.4–45.6) | 59.3% | 68.5% | $0.00 |
+| `bm25-chunks-bodies` | 43.9% (37.8–50.1) | 60.3% | 65.7% | $0.00 |
+| `embed` | 43.0% (37.0–49.3) | 57.9% | 67.8% | $0.00 |
+| **`hybrid`** | **45.5%** (39.4–51.8) | **65.2%** | **73.1%** | $0.00 |
+
+Top-1's interval still overlaps every other row, so on the headline metric nothing is established — as has been true of every gap in this ladder. The Recall@3 and Recall@5 margins are the largest in the project (+4.9pp and +4.6pp over the previous best), and they remain the statistic with no interval.
+
+Sphinx reaches **36.4%**, eight times rung 1's 4.5%.
+
+**Fusion is not strictly better than its parents per repo.** `scikit-learn` 68.8% against lexical's 81.2%, `pylint` 25% against lexical's 50%. A rank-based rule has no way to know which retriever to trust on which repository, so where one is confidently right and the other confidently wrong, fusion splits the difference and can land below both.
+
+That is exactly the judgement a reranker could supply, and it sharpens rung 3's job: not "reorder a list" but "decide which retriever was right here". It also means the +45pp of headroom above is not uniformly available — some of it requires knowing something fusion structurally cannot.
 
 ### Sphinx is the ceiling's problem child
 
