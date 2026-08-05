@@ -1,6 +1,6 @@
 # ADR-0008: Rung 3 reranks with a served open-weights model, and stops claiming determinism
 
-**Status:** Accepted · 2026-08-05 · *no run has been paid for yet; every cost below is an estimate with its assumption named*
+**Status:** Accepted · 2026-08-05 · *amended the same day: the provider is OpenRouter, one model changed, and the reasoning axis is not symmetric. See [the amendment](#amended-2026-08-05--wrong-provider-and-a-pair-that-could-not-have-told-us-anything). No run has been paid for yet; every cost below is an estimate with its assumption named.*
 
 ## Context
 
@@ -114,3 +114,60 @@ Neither buys the property the phrase implies. **An entry that says "variance unm
 - **Groq** — fastest serving of the three checked, but its self-serve catalogue is Llama 3.x, GPT-OSS and Qwen3.6-27B, which cannot supply a cross-model table at two price tiers
 - **Fireworks batch inference at 50% off** — halves the bill, invalidates the latency column
 - **A proprietary frontier model as the ceiling row** — ADR-0007's amendment puts the open-weights gap at a size this project cannot resolve at n=244, and the ±6pp interval would swallow it. If it is measured later it is an additional row with its price, never the ladder's rung-3 entry
+
+## Amended 2026-08-05 — wrong provider, and a pair that could not have told us anything
+
+Two errors, of different kinds. Recorded rather than edited away, as ADR-0007's amendments are: the decisions below stand corrected, but the reasoning that produced them is the thing worth keeping on the record.
+
+### The provider was chosen without asking what account exists
+
+Together was picked because it carried every model on the shortlist with published IDs and prices, and because `langchain-together` is an `init_chat_model` provider. All true, and all beside the point: **the account that will pay for these runs is an OpenRouter account.** No amount of comparing Together against Fireworks against Groq was going to surface that, because it was never a question about providers.
+
+The decision is now **OpenRouter**, and the original comparison was wasted work rather than wrong work.
+
+`init_chat_model(model_provider="openrouter")` was verified rather than assumed — LangChain's own forum carries a report of it raising, which turns out to be stale. On `langchain` 1.3.14 / `langchain-core` 1.5.3 / `langchain-openrouter` 0.2.7 it returns a `ChatOpenRouter`, so [ADR-0005](0005-langgraph.md)'s commitment survives intact and rung 3 needs no bespoke client.
+
+### The two models were 1.5pp apart against a ±6pp interval
+
+The worse error, because it repeats one this series already records.
+
+`DeepSeek-V4-Flash-0731` and `MiniMax-M3` were paired as "cheap" and "strong". On the SWE-bench Verified figures circulating for them they sit at roughly **79% and 80.5%** — 1.5 percentage points apart, for 3.3× the input price. **This project's Top-1 interval at n=244 is ±6pp.** The cross-model table was therefore constructed so that its most likely outcome was "indistinguishable", which is exactly the failure the top of `CLAUDE.md` describes: asserting a capability ranking smaller than the project's own confidence interval.
+
+The pair is now chosen to span a price range the measurement can resolve:
+
+| Role | Model | in / out per 1M | context | licence |
+|---|---|---|---|---|
+| cheap | `openai/gpt-oss-120b` | **$0.037 / $0.17** | 131,072 | Apache-2.0 |
+| strong | `minimax/minimax-m3` | $0.30 / $1.20 | 1,048,576 | — |
+
+**8.1× on input, 7.1× on output.** The question the table now asks is one a null result would still answer: *does paying eight times more buy anything here at all?*
+
+`gpt-oss-120b` is pinned at Hub revision `b5c939de8f754692c1647ca79fbf85e8c1e70f8a`.
+
+**`qwen/qwen3.7-flash` was the cheaper candidate at $0.030/$0.13 and was rejected on this ADR's own criterion.** It has no Hugging Face repository — "Flash" is Alibaba's hosted service tier, not a weights release. Open weights was the decision this ADR inherited from ADR-0007's amendment, and a model that cannot be pinned to a published artifact fails it regardless of price.
+
+### The reasoning axis is no longer symmetric, and the ablation is weaker for it
+
+The original design ran two models × thinking {on, off} — one variable per pair, four cells. That worked because both models had an off switch.
+
+**`gpt-oss-120b` has no off.** It exposes `reasoning_effort` at `low` / `medium` / `high`, defaulting to medium, with no documented way to disable reasoning entirely. So the four cells are now:
+
+| Run | Setting | Est. cost |
+|---|---|---|
+| `gpt-oss-120b`, low effort | `reasoning_effort="low"` | **$0.06** |
+| `gpt-oss-120b`, high effort | `reasoning_effort="high"` | **$0.14** |
+| `minimax-m3`, thinking off | `thinking: {type: disabled}` | **$0.42** |
+| `minimax-m3`, thinking on | adaptive, the default | **$1.00** |
+| | | **$1.62 total** |
+
+**Name what this costs.** The axis is now "the least and most reasoning each model permits", which is a *model-specific* quantity rather than one shared variable. Within each pair one variable still moves, so each ablation is clean on its own terms. Across the pair it is not: "reasoning helped gpt-oss more than MiniMax" would be comparing low-vs-high against off-vs-on, and this ADR does not license that sentence. The two ablations are read separately or not at all.
+
+### Consequences that move
+
+**The ladder's rung-3 row is re-declared, still in advance of any number: `openai/gpt-oss-120b` at `reasoning_effort="high"`.** The original declaration named the cheaper model in its default mode; "default mode" no longer picks out a cell that is being run, so the higher-reasoning setting is named instead, matching what "thinking on" meant for the original pin. Declared before the runs, for the same reason as the first time — so the headline cannot be whichever of four cells happens to win.
+
+**Total falls from $1.92 to about $1.62**, and the per-run hard cap of $1.50 is unchanged: it was set to clear the most expensive cell, which is still MiniMax-M3 at an estimated $1.00.
+
+**The prompt, the payload, K=20, the full reordering, and the dropped determinism claim are all unaffected.** None of them depended on the provider or on which two models were named.
+
+**One thing this amendment does not fix.** Both models' headline scores come from SWE-bench Verified — the benchmark this project evaluates on. A model advertising 80% there has been measured against, and plausibly tuned near, the dev split's instances. That is not evidence about rung 3 and it is not independent of the number this milestone will publish. `CONTEXT.md` names Contamination and M6's Fresh Set exists for exactly this; until then a rung-3 result on this split carries the asterisk.
