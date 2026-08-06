@@ -30,6 +30,6 @@ HANDOFF.md
 # Scratch run notes. Ignored rather than merely deleted: `code_version()`
 # reads `git status --porcelain`, which counts untracked files, so a stray
 # scratch file in the root makes every run stamp `-dirty` and become
-# unpublishable.
+# unpublishable. Run logs live outside the project entirely; this is only
+# for the command crib sheet, which has to be here to be copied from.
 RUN-COMMANDS.txt
-run-test.txt
