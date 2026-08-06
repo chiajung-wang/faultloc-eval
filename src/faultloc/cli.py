@@ -23,6 +23,7 @@ from faultloc.embedding import (
     build_index,
     load_encoder,
 )
+from faultloc.llm import MODELS
 from faultloc.reporting import (
     Provenance,
     code_version,
@@ -38,6 +39,7 @@ from faultloc.rungs.bm25_chunks import Bm25ChunksRung
 from faultloc.rungs.cross_encoder import CrossEncoderRung
 from faultloc.rungs.embed import EmbedRung
 from faultloc.rungs.hybrid import HybridRung
+from faultloc.rungs.rerank import BudgetExceededError, LlmRerankRung
 from faultloc.scoring import score
 
 app = typer.Typer(
@@ -53,6 +55,13 @@ RUNGS: dict[str, Callable[[], Rung]] = {
     "embed": EmbedRung,
     "hybrid": HybridRung,
     "cross-encoder": CrossEncoderRung,
+    # `rerank` is ADR-0008's declared ladder row, named before any number
+    # existed. The other three are the cross-model table and the reasoning
+    # ablations, and are not the rung-3 headline whatever they score.
+    "rerank": partial(LlmRerankRung, model=MODELS["gpt-oss-high"]),
+    "rerank-gpt-oss-low": partial(LlmRerankRung, model=MODELS["gpt-oss-low"]),
+    "rerank-deepseek-off": partial(LlmRerankRung, model=MODELS["deepseek-off"]),
+    "rerank-deepseek-on": partial(LlmRerankRung, model=MODELS["deepseek-on"]),
 }
 DEFAULT_RESULTS = Path("RESULTS.md")
 
@@ -111,6 +120,22 @@ def index(
     typer.echo(f"  cost        ${report.cost_usd:.2f}")
 
 
+def _failure_note(engine: Rung) -> str:
+    """The ways a rung silently kept its input ranking, if it counts them."""
+    counted = [
+        (label, getattr(engine, attribute, 0))
+        for attribute, label in (
+            ("unparseable", "unparseable replies"),
+            ("truncated", "truncated replies"),
+            ("off_list", "off-list paths"),
+        )
+    ]
+    reported = [f"{count} {label}" for label, count in counted if count]
+    if not reported:
+        return ""
+    return f"Degraded: {', '.join(reported)}."
+
+
 @app.command()
 def evaluate(
     rung: Annotated[
@@ -148,7 +173,14 @@ def evaluate(
     # the blob-keyed token cache, and with it the 21x content reuse measured in
     # issue 04 -- the difference between 80 seconds and half an hour.
     engine = RUNGS[rung]()
-    predictions = [engine.predict(instance) for instance in instances]
+    try:
+        predictions = [engine.predict(instance) for instance in instances]
+    except BudgetExceededError as stopped:
+        # No entry, no partial score. A run that stopped early was scored on a
+        # different instance set, which is exactly what `--limit` refuses to
+        # publish for.
+        raise typer.BadParameter(f"budget cap reached: {stopped}") from stopped
+
     report = score(predictions, instances, rung=rung, split=split)
     wall_clock = time.perf_counter() - started
 
@@ -164,6 +196,12 @@ def evaluate(
     )
 
     typer.echo(render_terminal(report, provenance, loaded.report, wall_clock))
+
+    # Rung 3's failure modes all leave a *ranking* behind -- the one it was
+    # handed -- so a run that failed everywhere scores like the rung below it
+    # and reads as a null result. The counts go in the entry's note so the
+    # number can never be published without them.
+    note = " ".join(part for part in (note, _failure_note(engine)) if part)
 
     # A truncated run is not the benchmark. Letting `--limit` write an entry
     # would put a number scored on a different instance set into a log whose
