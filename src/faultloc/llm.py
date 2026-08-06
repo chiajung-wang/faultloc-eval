@@ -51,6 +51,12 @@ MAX_BACKOFF_S = 120.0
 #: retrying it burns the rate limit that the real calls need.
 RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
 
+#: Seconds to wait on one request. DeepInfra took over 300 on a single
+#: instance against the old 180-second default, and it averages 154, so the
+#: tail runs well past twice the mean. A timeout shorter than the slowest
+#: route turns a working provider into a broken one.
+DEFAULT_TIMEOUT_S = 900.0
+
 
 class MissingKeyError(RuntimeError):
     """No API key. Named separately so the failure reads as setup, not a bug."""
@@ -91,16 +97,24 @@ class Model:
 #: while DeepSeek's is off-against-on. Each pair moves one variable; the two
 #: pairs are not comparable to each other, and the ADR says so.
 #:
-#: gpt-oss routes to Groq. Cerebras was faster still -- 722 tok/s against 198 --
-#: but **enforces an 8,192-token completion limit while advertising 40,960**,
-#: and high effort needs 7,300-8,200 tokens on this prompt. It therefore
-#: truncated a third of replies, and a truncated reply degrades to the input
-#: ranking, which would have published as "the model did not help" when the
-#: model never answered. Speed is worthless if the answer is cut off.
+#: gpt-oss routes to DeepInfra, which is the slowest option and was reached by
+#: eliminating the faster ones. Each rejection was measured, not assumed:
 #:
-#: Precision is not the trade it looks like: `gpt-oss-120b` ships *natively* in
-#: MXFP4, so every 16-bit endpoint is upcasting already-4-bit weights. Groq
-#: reporting `unknown` quantization costs less than it appears to.
+#:   Cerebras  723 tok/s, but **enforces an 8,192-token completion limit while
+#:             advertising 40,960**. High effort needs 7,300-8,200 tokens here,
+#:             so it truncated a third of replies -- and a truncated reply
+#:             degrades to the input ranking, which publishes as "the model did
+#:             not help" when the model never answered.
+#:   Groq      198 tok/s, and OpenRouter's shared capacity for it ran out
+#:             mid-run: 429 at instance 110, still limited thirty minutes later.
+#:   DeepInfra 40 tok/s. Ten hours for a dev run, and slow enough that single
+#:             instances exceed five minutes -- but no cap and no shared pool.
+#:
+#: Speed is worthless if the answer is cut off or the run dies. With responses
+#: cached, patience is the cheap axis: an interrupted run resumes.
+#:
+#: Precision is not the trade it appears to be: `gpt-oss-120b` ships *natively*
+#: in MXFP4, so every 16-bit endpoint is upcasting already-4-bit weights.
 MODELS = {
     "gpt-oss-low": Model(
         label="gpt-oss-low",
@@ -159,13 +173,19 @@ def _send(request: urllib.request.Request, *, timeout: float) -> dict:
     Retries only the statuses that mean *try again*. A 400 or a 404 fails the
     same way every time -- retrying those would burn the rate limit that the
     calls still to come depend on.
+
+    **Two places carry a failure, and only one of them is the status line.**
+    OpenRouter answers HTTP 200 with `{"error": {"code": 504}}` in the body
+    when an upstream provider times out. A retry watching only `HTTPError`
+    never sees it -- which is how a 504 killed the ladder row moments after
+    the backoff above was built, without retrying once.
     """
     for attempt in range(MAX_ATTEMPTS):
+        last = attempt == MAX_ATTEMPTS - 1
         try:
             with urllib.request.urlopen(request, timeout=timeout) as raw:
-                return json.load(raw)
+                payload = json.load(raw)
         except urllib.error.HTTPError as failed:
-            last = attempt == MAX_ATTEMPTS - 1
             if failed.code not in RETRYABLE or last:
                 # The body carries the reason; the status line does not. A 404
                 # here usually means the account's provider policy excludes
@@ -173,6 +193,16 @@ def _send(request: urllib.request.Request, *, timeout: float) -> dict:
                 # "Not Found".
                 raise RuntimeError(f"openrouter {failed.code}: {_reason(failed)}") from failed
             time.sleep(_wait(failed, attempt))
+            continue
+
+        error = payload.get("error")
+        if not error:
+            return payload
+
+        code = error.get("code")
+        if code not in RETRYABLE or last:
+            raise RuntimeError(f"openrouter {code}: {error.get('message', error)}")
+        time.sleep(min(BACKOFF_S * 2**attempt, MAX_BACKOFF_S))
 
     raise AssertionError("unreachable: the final attempt either returns or raises")
 
@@ -207,7 +237,9 @@ def _reason(failed: urllib.error.HTTPError) -> str:
     return message
 
 
-def call(model: Model, prompt: str, *, max_tokens: int, timeout: float = 180.0) -> Response:
+def call(
+    model: Model, prompt: str, *, max_tokens: int, timeout: float = DEFAULT_TIMEOUT_S
+) -> Response:
     """One chat completion, pinned to `model`'s route.
 
     `allow_fallbacks` is false rather than a fallback order: a silent reroute
@@ -235,9 +267,6 @@ def call(model: Model, prompt: str, *, max_tokens: int, timeout: float = 180.0) 
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
     payload = _send(request, timeout=timeout)
-
-    if "error" in payload:
-        raise RuntimeError(f"openrouter: {payload['error']}")
 
     choice = payload["choices"][0]
     usage = payload.get("usage") or {}

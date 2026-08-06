@@ -167,3 +167,56 @@ class TestBackoffCeiling:
         llm.call(MODEL, "prompt", max_tokens=100)
 
         assert sum(no_network.slept) > 120
+
+
+def error_body(code: int, message: str = "Provider timed out"):
+    """A 200 response whose *payload* carries the error.
+
+    OpenRouter does this: HTTP 200, `{"error": {"code": 504}}` in the body.
+    A retry that only watches the status line never sees it.
+    """
+    payload = {"error": {"message": message, "code": code}}
+
+    class Fake(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    return Fake(json.dumps(payload).encode())
+
+
+class TestBodyLevelErrors:
+    def test_a_504_in_the_body_is_retried_like_one_in_the_status_line(self, no_network) -> None:
+        """This killed the ladder row after the patient backoff was built --
+        the retry never ran, because the error never reached it."""
+        calls = no_network(error_body(504), ok_response())
+        response = llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert response.text == "a.py"
+        assert len(calls) == 2
+
+    def test_a_non_retryable_code_in_the_body_still_raises_at_once(self, no_network) -> None:
+        calls = no_network(error_body(400, "malformed request"))
+
+        with pytest.raises(RuntimeError, match="400"):
+            llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert len(calls) == 1
+
+    def test_it_gives_up_after_the_last_attempt(self, no_network) -> None:
+        errors = [error_body(504) for _ in range(llm.MAX_ATTEMPTS)]
+        calls = no_network(*errors)
+
+        with pytest.raises(RuntimeError, match="504"):
+            llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert len(calls) == llm.MAX_ATTEMPTS
+
+
+class TestTimeout:
+    def test_the_default_clears_a_slow_route(self) -> None:
+        """DeepInfra took over 300s on one instance against a 180s default.
+        It averages 154s, so the tail runs well past twice the mean."""
+        assert llm.DEFAULT_TIMEOUT_S >= 600
