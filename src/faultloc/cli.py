@@ -7,7 +7,7 @@ results. Logic lives in the package, so it stays testable without a subprocess.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Annotated
@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from faultloc import __version__
+from faultloc.dataset.models import Instance
 from faultloc.dataset.splits import load_splits
 from faultloc.dataset.verified import DATASET_ID, DATASET_REVISION, load_verified_set
 from faultloc.embedding import (
@@ -33,14 +34,14 @@ from faultloc.reporting import (
     today,
 )
 from faultloc.repos import RepoStore
-from faultloc.rungs import Rung
+from faultloc.rungs import Prediction, Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
 from faultloc.rungs.cross_encoder import CrossEncoderRung
 from faultloc.rungs.embed import EmbedRung
 from faultloc.rungs.hybrid import HybridRung
 from faultloc.rungs.rerank import BudgetExceededError, LlmRerankRung
-from faultloc.scoring import score
+from faultloc.scoring import score, top_1_hit
 
 app = typer.Typer(
     name="faultloc",
@@ -120,6 +121,75 @@ def index(
     typer.echo(f"  cost        ${report.cost_usd:.2f}")
 
 
+#: Instances between progress lines. Every instance is too noisy to tail for
+#: 244 of them; every 25 leaves a rung-3 run silent for two minutes at a time.
+PROGRESS_EVERY = 10
+
+
+def _progress_line(
+    done: int,
+    total: int,
+    hits: int,
+    spent: float,
+    cap: float,
+    elapsed_s: float,
+    degraded: tuple[int, int, int],
+) -> str:
+    """One status line for a run in flight.
+
+    Running Top-1 is here to catch a broken run early rather than after an
+    hour: a rung whose replies are all failing degrades to its input ranking,
+    so its accuracy tracks the rung below it from the first ten instances.
+    """
+    pace = elapsed_s / done if done else 0.0
+    eta_m = pace * (total - done) / 60
+    budget = f"${spent:.3f}/${cap:.2f}" if cap else f"${spent:.2f}"
+    return (
+        f"[{done:>4}/{total}] {done / total:>4.0%}   "
+        f"top-1 {hits / done:>5.1%}   {budget}   "
+        f"{pace:.1f}s/inst   eta {eta_m:.0f}m   "
+        f"degraded {degraded[0]}/{degraded[1]}/{degraded[2]}"
+    )
+
+
+def _run(engine: Rung, instances: Sequence[Instance]) -> list[Prediction]:
+    """Predict every instance, reporting progress as it goes.
+
+    Progress is echoed rather than rendered with a live display: a long run is
+    detached with its output redirected, where a terminal-only progress bar
+    prints nothing at all. `nl` forces a flush so `tee` shows it live instead
+    of holding it in a pipe buffer.
+    """
+    predictions: list[Prediction] = []
+    started = time.perf_counter()
+    hits = 0
+
+    for done, instance in enumerate(instances, 1):
+        prediction = engine.predict(instance)
+        predictions.append(prediction)
+        hits += top_1_hit(prediction, instance)
+
+        if done % PROGRESS_EVERY == 0 or done == len(instances):
+            typer.echo(
+                _progress_line(
+                    done,
+                    len(instances),
+                    hits,
+                    sum(p.cost_usd for p in predictions),
+                    getattr(engine, "budget_usd", 0.0),
+                    time.perf_counter() - started,
+                    (
+                        getattr(engine, "unparseable", 0),
+                        getattr(engine, "truncated", 0),
+                        getattr(engine, "off_list", 0),
+                    ),
+                ),
+                nl=True,
+            )
+
+    return predictions
+
+
 def _failure_note(engine: Rung) -> str:
     """The ways a rung silently kept its input ranking, if it counts them."""
     counted = [
@@ -174,7 +244,7 @@ def evaluate(
     # issue 04 -- the difference between 80 seconds and half an hour.
     engine = RUNGS[rung]()
     try:
-        predictions = [engine.predict(instance) for instance in instances]
+        predictions = _run(engine, instances)
     except BudgetExceededError as stopped:
         # No entry, no partial score. A run that stopped early was scored on a
         # different instance set, which is exactly what `--limit` refuses to

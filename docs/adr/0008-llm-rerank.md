@@ -266,3 +266,20 @@ Measured on one prompt at high reasoning effort:
 **What this does not settle.** Whether serving precision moves *accuracy* on this task is unmeasured, and nothing here claims otherwise. It is simply no longer a question that has to be answered to choose a route, because the fast option is not the low-precision one. If a rung-3 result ever turns on it, the ablation is one model, two serves, one variable.
 
 **Recorded rather than edited away**, as with the second amendment: the error was reasoning from a general belief — bf16 means full precision — without checking what this particular model actually is. That is the same failure mode as naming a model from memory, one level further in.
+
+## Budget note, 2026-08-06 — the first attempt is charged to setup, not to measurement
+
+M4's first full-run attempt spent **$2.25 and completed nothing**. Four cells launched in parallel; one died at seven minutes on an unretried 429, and the rest were killed once it was clear the per-instance cost estimates were ~45% low.
+
+That spend is recorded as **setup rather than measurement**, and the $5.00 milestone cap is counted from here. The reasoning: none of it produced a number, and all of it bought things the milestone needed anyway — a working client, the provider-routing discovery, the account policy fix, the rate-limit gap, and a per-instance cost figure grounded in 20 instances instead of three.
+
+Stated rather than quietly rebased, because a cap that resets whenever it is inconvenient is not a cap. The condition for charging spend to setup is that it produced no publishable number **and** that what it did produce is now in the repository as code or as a decision. Both hold here.
+
+**Re-measured on 20 instances** (`--limit 20`, which refuses to write an entry, so it is a measurement and not a truncated run):
+
+| | 3-instance estimate | 20-instance measurement |
+|---|---|---|
+| ladder row, cost | $1.46 | **$1.34** |
+| ladder row, wall clock | 34 min | **20 min** |
+
+Both estimates were high because fixed startup — loading the benchmark, the splits and the retriever's encoder — was amortised over three instances. The overrun on the first attempt came from the other three cells, whose estimates rested on two-instance samples and have not been re-measured.
