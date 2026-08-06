@@ -4,13 +4,13 @@
 
 ## Context
 
-The system is designed to abstain — to escalate low-confidence instances to a human rather than guess. That requires a confidence score, and the accuracy-vs-coverage curve requires that score to be meaningful.
+The system abstains by design. It escalates low-confidence instances to a human rather than guess. That needs a confidence score, and the accuracy-vs-coverage curve needs that score to mean something.
 
-The cheapest option is to ask the model to rate its own confidence. Language models are known to be poorly calibrated when doing so, clustering near high values regardless of correctness.
+The cheapest option is to ask the model to rate its own confidence. Language models calibrate poorly when they do this. Their scores cluster near high values whatever the true correctness.
 
 ## Decision
 
-Confidence is produced by a **logistic regression** over cheap features:
+A **logistic regression** over cheap features produces the confidence score:
 
 - retrieval margin (score gap between top-1 and top-2 candidates)
 - the model's self-reported confidence
@@ -18,26 +18,26 @@ Confidence is produced by a **logistic regression** over cheap features:
 - whether the predicted file appeared in retrieval top-k
 - agreement across **two** samples
 
-Fit on the dev split only. Reported with **ECE** and a reliability diagram alongside the coverage curve.
+Fit the calibrator on the dev split only. Report it with **ECE** and a reliability diagram, beside the coverage curve.
 
 ## Rationale
 
-Self-report and retrieval margin are each weak alone — one is overconfident, the other blind to everything the agent did after retrieval. A calibrator combines them into an actual probability.
+Self-report and retrieval margin are each weak alone. One is overconfident. The other is blind to everything the agent did after retrieval. A calibrator combines them into an actual probability.
 
-Two samples rather than five keeps sampling cost at roughly 2× while still yielding a stability feature. Five-sample self-consistency was priced at roughly $250 across the benchmark and still would not produce a calibrated probability — agreement rate is not a probability.
+Two samples rather than five holds the sampling cost near 2× and still yields a stability feature. Five-sample self-consistency priced out at roughly $250 across the benchmark. It still would not produce a calibrated probability, because an agreement rate is not a probability.
 
-This enables the claim that distinguishes the project: *when the system says 80% confident, it is right 80% of the time* — measured, not asserted.
+This supports the claim that distinguishes the project: *when the system says 80% confident, it is right 80% of the time*. Measured, not asserted.
 
 ## Consequences
 
-**Split discipline is mandatory.** Dev and test splits are fixed before any tuning. The calibrator is fit on dev. The test set is evaluated once. Violating this invalidates every calibration number, silently.
+**Split discipline is mandatory.** Freeze the dev and test splits before any tuning. Fit the calibrator on dev. Evaluate the test set once. A break in this rule invalidates every calibration number, and it does so silently.
 
-- Sampling cost roughly doubles for rungs where the agreement feature is used.
-- The calibrator is itself a model that can be wrong, and its failure modes must be reported like any other component's.
+- Sampling cost roughly doubles for every rung that uses the agreement feature.
+- The calibrator is itself a model that can be wrong. Report its failure modes as you report any other component's.
 
 ## Alternatives rejected
 
 - **LLM self-report alone** — free, but the coverage curve would mostly document its miscalibration
-- **Retrieval margin alone** — free and deterministic, but degrades exactly where the agent adds value
+- **Retrieval margin alone** — free and deterministic, but it degrades exactly where the agent adds value
 - **Self-consistency at k=5** — strong signal, expensive, still uncalibrated
-- **Token logprobs** — unavailable or unreliable across providers when tool use is involved
+- **Token logprobs** — unavailable or unreliable across providers when the agent uses tools
