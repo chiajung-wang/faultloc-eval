@@ -39,9 +39,12 @@ from faultloc.rungs.hybrid import HybridRung
 #: this is the ceiling on a cell's price as much as on its answer.
 MAX_TOKENS = 4000
 
-#: ADR-0008's per-run cap. Checked against spend already incurred, so the run
-#: stops rather than reporting an overspend once it is too late to matter.
-BUDGET_USD = 1.50
+#: ADR-0008's per-run cap, raised from $1.50 when gpt-oss moved to Cerebras:
+#: 10x the speed costs 5x the tokens' price, putting that cell near $1.29 on a
+#: single-call estimate. A cap that the expected cost sits just under is a cap
+#: that aborts on ordinary variance. Checked against spend already incurred, so
+#: the run stops rather than reporting an overspend once it is too late.
+BUDGET_USD = 2.00
 
 PROMPT = """\
 A bug was reported against a Python repository. Below are {n} candidate source \

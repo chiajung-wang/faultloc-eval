@@ -75,17 +75,23 @@ class Model:
 #: reasoning, only to ask for less of it, so its ablation is low-against-high
 #: while DeepSeek's is off-against-on. Each pair moves one variable; the two
 #: pairs are not comparable to each other, and the ADR says so.
+#:
+#: gpt-oss routes to Cerebras, measured at 722 tok/s against DeepInfra's 40 --
+#: 18x, which is the difference between a 40-minute run and a seven-hour one.
+#: Precision is not the trade it looks like: `gpt-oss-120b` ships *natively* in
+#: MXFP4, so every 16-bit endpoint is upcasting already-4-bit weights, and the
+#: fp4 endpoints measured slower than bf16 anyway. Speed here is hardware.
 MODELS = {
     "gpt-oss-low": Model(
         label="gpt-oss-low",
         name="openai/gpt-oss-120b",
-        provider="deepinfra/bf16",
+        provider="cerebras/fp16",
         reasoning={"effort": "low"},
     ),
     "gpt-oss-high": Model(
         label="gpt-oss-high",
         name="openai/gpt-oss-120b",
-        provider="deepinfra/bf16",
+        provider="cerebras/fp16",
         reasoning={"effort": "high"},
     ),
     "deepseek-off": Model(

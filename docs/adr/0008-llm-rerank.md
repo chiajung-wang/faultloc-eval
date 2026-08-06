@@ -1,6 +1,6 @@
 # ADR-0008: Rung 3 reranks with a served open-weights model, and stops claiming determinism
 
-**Status:** Accepted · 2026-08-05 · *amended twice the same day: the provider is OpenRouter, both models changed, the reasoning axis is not symmetric, and the upstream serve must be pinned because it varies in quantization. See [the first](#amended-2026-08-05--wrong-provider-and-a-pair-that-could-not-have-told-us-anything) and [second](#amended-again-2026-08-05--the-strong-row-is-deepseek-and-a-model-id-does-not-determine-the-number) amendments. No run has been paid for yet; every cost below is an estimate with its assumption named.*
+**Status:** Accepted · 2026-08-05 · *amended twice the same day: the provider is OpenRouter, both models changed, the reasoning axis is not symmetric, and the upstream serve must be pinned because it varies in quantization. See the [first](#amended-2026-08-05--wrong-provider-and-a-pair-that-could-not-have-told-us-anything), [second](#amended-again-2026-08-05--the-strong-row-is-deepseek-and-a-model-id-does-not-determine-the-number) and [third](#amended-a-third-time-2026-08-06--full-precision-was-the-wrong-reason-to-pin-a-serve) amendments. No run has been paid for yet; every cost below is an estimate with its assumption named.*
 
 ## Context
 
@@ -241,3 +241,28 @@ Kept on the record rather than deleted because the mistake is the argument: a co
 `{"only": ["deepseek"]}` initially failed with *"No endpoints available matching your guardrail restrictions and data policy"*. OpenRouter filters routing by an account-level toggle for providers that may train on prompts, and DeepSeek's first-party endpoint falls outside the default. The setting was changed deliberately, on the basis that this project sends only SWE-bench issue text and code from public repositories.
 
 Worth recording because it is a **reproducibility precondition that lives outside the repository**. A third party with the pinned model, revision, provider tag and this commit still cannot reproduce a rung-3 row without the matching account setting, and no amount of pinning inside the codebase can express that.
+
+## Amended a third time 2026-08-06 — "full precision" was the wrong reason to pin a serve
+
+The second amendment pinned `openai/gpt-oss-120b` to `deepinfra/bf16` and justified it as the full-precision endpoint. **That justification does not hold for this model.**
+
+`gpt-oss-120b` ships *natively* in MXFP4: OpenAI post-trained it with the MoE weights — over 90% of its parameters — quantized to 4.25 bits, with the remaining tensors in BF16. So a bf16 endpoint is **upcasting weights that were already 4-bit**, not serving a higher-fidelity copy. There is no full-precision serve of this model to pin, and choosing bf16 bought nothing it was chosen for.
+
+Measured on one prompt at high reasoning effort:
+
+| tag | quantization | in / out per 1M | throughput | est. dev run |
+|---|---|---|---|---|
+| `deepinfra/bf16` | bf16 | $0.037 / $0.17 | 40 tok/s | 7.0 h · $0.24 |
+| `coreweave/fp4` | fp4 | $0.030 / $0.17 | 34 tok/s | ~8 h · $0.20 |
+| `groq` | unknown | $0.150 / $0.60 | 198 tok/s | ~2 h · $0.88 |
+| **`cerebras/fp16`** | **fp16** | $0.350 / $0.75 | **723 tok/s** | **~34 min · $1.46** |
+
+**The fp4 endpoint is the slowest thing measured.** Speed here is hardware — wafer-scale and LPU parts against GPUs — not precision, so the quantization-versus-latency trade this table was expected to show does not exist. Cerebras serves at fp16, the same 16-bit class as the incumbent, and is 18× faster.
+
+**Decision: gpt-oss routes to `cerebras/fp16`.** Declared before any accuracy number exists, on stated grounds of throughput at an equal precision class. Verified end to end through the rung at 25s for three instances, against 5m11s on DeepInfra.
+
+**The per-run cap rises from $1.50 to $2.00.** Ten times the speed costs roughly five times the price per token, putting this cell at **$1.46** measured — which the old cap would have aborted on ordinary variance. The milestone cap of $5.00 is unchanged and still clears the four cells at an estimated $3.30 total.
+
+**What this does not settle.** Whether serving precision moves *accuracy* on this task is unmeasured, and nothing here claims otherwise. It is simply no longer a question that has to be answered to choose a route, because the fast option is not the low-precision one. If a rung-3 result ever turns on it, the ablation is one model, two serves, one variable.
+
+**Recorded rather than edited away**, as with the second amendment: the error was reasoning from a general belief — bf16 means full precision — without checking what this particular model actually is. That is the same failure mode as naming a model from memory, one level further in.
