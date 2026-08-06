@@ -31,6 +31,7 @@ constants table or a top-level configuration block becomes unretrievable.
 from __future__ import annotations
 
 import ast
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -96,7 +97,17 @@ def chunk_source(source: str, *, include_bodies: bool = False) -> tuple[Chunk, .
     inflating both the corpus and the enclosing chunk's length.
     """
     try:
-        tree = ast.parse(source)
+        with warnings.catch_warnings():
+            # The warnings belong to the code being analysed, not to this
+            # project. Older django, sympy and matplotlib are full of regex and
+            # LaTeX strings written without an `r` prefix, which Python reports
+            # as SyntaxWarning -- hundreds per run, every one of them labelled
+            # `<unknown>` because `ast.parse` is given no filename, so none can
+            # be traced to a file. Nothing is actionable: the parse succeeds and
+            # the chunks are correct. Long runs are meant to be watched, and
+            # unattributable noise works against that.
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(source)
     except (SyntaxError, ValueError):  # ValueError: source containing null bytes
         return _windowed(_whole_file(source))
 

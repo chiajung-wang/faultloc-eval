@@ -9,6 +9,8 @@ moving a number.
 
 from __future__ import annotations
 
+import warnings
+
 from faultloc.rungs.chunks import WINDOW_CHARS, Chunk, aggregate_by_file, chunk_source
 
 
@@ -212,3 +214,35 @@ class TestChunkText:
         was seen first."""
         chunk = Chunk(name="f", kind="function", signature="def f()", docstring="Doc.")
         assert chunk.text == "def f()\nDoc."
+
+
+class TestWarningSuppression:
+    """Parsing is done on other people's code, and it is noisy.
+
+    Older django, sympy and matplotlib are full of regex and LaTeX strings
+    written without an `r` prefix -- `"\\d+"`, `"\\p"` -- which Python 3.12
+    reports as SyntaxWarning. Hundreds appear per run, all labelled `<unknown>`
+    because `ast.parse` is given no filename, so none of them can even be
+    traced back to a file. They are not actionable: the parse succeeds and the
+    chunks are correct.
+    """
+
+    def test_an_invalid_escape_in_the_parsed_source_warns_nobody(self) -> None:
+        source = 'def matches(text):\n    return re.match("\\d+", text)\n'
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            chunks = chunk_source(source, include_bodies=True)
+
+        assert chunks
+        assert [w for w in caught if issubclass(w.category, SyntaxWarning)] == []
+
+    def test_suppression_does_not_leak_out_of_the_call(self) -> None:
+        """Silencing our own parse must not silence the caller's warnings."""
+        chunk_source('x = "\\d"')
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            warnings.warn("unrelated", SyntaxWarning, stacklevel=1)
+
+        assert len(caught) == 1
