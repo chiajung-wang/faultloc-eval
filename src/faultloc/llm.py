@@ -26,17 +26,25 @@ from faultloc.env import load_env
 
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
-#: A dev-split run is 244 sequential calls. Without retries a single transient
-#: rate limit anywhere in it destroys the whole run and everything spent on it,
-#: which is what happened on M4's first full attempt: $2.25 for zero completed
-#: runs. Five attempts covers a provider quota window; more would mean the
-#: provider is down rather than busy.
-MAX_ATTEMPTS = 5
+#: A dev-split run is 244 sequential calls, so one unrecovered rate limit
+#: anywhere in it destroys the run and everything spent on it. That has now
+#: happened twice: $2.25 on M4's first attempt with no retry at all, and $0.63
+#: at instance 110 with five attempts and fifteen seconds of total backoff.
+#:
+#: Eight attempts at 2s doubling waits about four minutes in total. That rides
+#: out a burst; it does not ride out a saturated shared pool, which is what
+#: OpenRouter's Groq capacity turned out to be -- still limited thirty minutes
+#: later. No amount of patience fixes that, and pretending otherwise would just
+#: fail slower. Route choice is the answer there, not backoff.
+MAX_ATTEMPTS = 8
 
-#: Doubling from one second: 1, 2, 4, 8. Constant retries against a rate limit
-#: are just the same burst again, so the wait has to grow for the window to
-#: clear.
-BACKOFF_S = 1.0
+#: Doubling from two seconds: 2, 4, 8, 16, 32, 64, 120. Constant retries
+#: against a rate limit are the same burst again, so the wait has to grow.
+BACKOFF_S = 2.0
+
+#: Ceiling on one wait. Past two minutes the provider is not busy, it is out,
+#: and a run that sits blocked for longer should fail loudly instead.
+MAX_BACKOFF_S = 120.0
 
 #: Busy, not broken. Everything else -- a malformed request, an unknown model,
 #: a provider policy rejection -- fails identically on every attempt, and
@@ -97,13 +105,13 @@ MODELS = {
     "gpt-oss-low": Model(
         label="gpt-oss-low",
         name="openai/gpt-oss-120b",
-        provider="groq",
+        provider="deepinfra/bf16",
         reasoning={"effort": "low"},
     ),
     "gpt-oss-high": Model(
         label="gpt-oss-high",
         name="openai/gpt-oss-120b",
-        provider="groq",
+        provider="deepinfra/bf16",
         reasoning={"effort": "high"},
     ),
     "deepseek-off": Model(
@@ -181,7 +189,7 @@ def _wait(failed: urllib.error.HTTPError, attempt: int) -> float:
             return float(header)
         except ValueError:
             pass
-    return BACKOFF_S * 2**attempt
+    return min(BACKOFF_S * 2**attempt, MAX_BACKOFF_S)
 
 
 def _reason(failed: urllib.error.HTTPError) -> str:

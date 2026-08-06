@@ -147,3 +147,23 @@ class TestRequest:
         assert response.cost_usd == pytest.approx(0.0042)
         assert response.provider == "Cerebras"
         assert response.reasoning_tokens == 5
+
+
+class TestBackoffCeiling:
+    def test_a_single_wait_is_capped(self, no_network) -> None:
+        """Past two minutes the provider is not busy, it is out. A run that
+        sits blocked longer than that should fail loudly rather than stall."""
+        errors = [http_error(429) for _ in range(llm.MAX_ATTEMPTS - 1)]
+        no_network(*errors, ok_response())
+        llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert max(no_network.slept) <= llm.MAX_BACKOFF_S
+
+    def test_patience_grew_after_a_run_died_at_instance_110(self, no_network) -> None:
+        """Five attempts over fifteen seconds lost a run and $0.63. The total
+        wait now spans minutes, which rides out a burst."""
+        errors = [http_error(429) for _ in range(llm.MAX_ATTEMPTS - 1)]
+        no_network(*errors, ok_response())
+        llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert sum(no_network.slept) > 120
