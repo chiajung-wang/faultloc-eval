@@ -30,6 +30,7 @@ from faultloc.dataset.models import Instance
 from faultloc.llm import MODELS, Model, Response
 from faultloc.llm import call as call_openrouter
 from faultloc.repos import RepoStore
+from faultloc.response_cache import ResponseCache
 from faultloc.rungs import Prediction, Rung, StopCondition
 from faultloc.rungs.cross_encoder import TOP_K, EvidenceSource
 from faultloc.rungs.hybrid import HybridRung
@@ -95,6 +96,7 @@ class LlmRerankRung:
         model: Model = MODELS["gpt-oss-high"],
         budget_usd: float = BUDGET_USD,
         top_k: int = TOP_K,
+        cache: ResponseCache | None = None,
     ) -> None:
         self.candidates = candidates or HybridRung(store)
         self.evidence = evidence or self.candidates.lexical.evidence
@@ -103,6 +105,10 @@ class LlmRerankRung:
         self.top_k = top_k
         self._call = call or (lambda prompt: call_openrouter(model, prompt, max_tokens=MAX_TOKENS))
 
+        # Off unless a cache is handed in, so a test that forgets one cannot
+        # quietly write into the real cache directory.
+        self.cache = cache
+
         #: Counted, not absorbed. Each is a way the rung can look like a null
         #: result while actually having failed.
         self.spent_usd = 0.0
@@ -110,6 +116,7 @@ class LlmRerankRung:
         self.unparseable = 0
         self.truncated = 0
         self.off_list = 0
+        self.cache_hits = 0
 
     def predict(self, instance: Instance) -> Prediction:
         started = time.perf_counter()
@@ -122,9 +129,7 @@ class LlmRerankRung:
         head = base.ranked_files[: self.top_k]
         tail = base.ranked_files[self.top_k :]
 
-        response = self._call(self._prompt(instance, head))
-        self.spent_usd += response.cost_usd
-        self.calls += 1
+        response = self._respond(self._prompt(instance, head))
 
         if response.truncated:
             self.truncated += 1
@@ -141,6 +146,30 @@ class LlmRerankRung:
             started,
             response.cost_usd,
         )
+
+    def _respond(self, prompt: str) -> Response:
+        """The model's reply, from cache when this question was already paid for.
+
+        Two accounting rules, and they point in different directions on
+        purpose. `spent_usd` counts only money leaving the account now, so a
+        resume is not aborted by a cap it already cleared once. The response's
+        own `cost_usd` still flows into the Prediction, because the entry
+        states what the number cost to *produce* -- a reader reproducing it
+        pays that regardless of what this machine had lying around.
+        """
+        if self.cache is not None:
+            hit = self.cache.get(self.model, prompt, MAX_TOKENS)
+            if hit is not None:
+                self.cache_hits += 1
+                return hit
+
+        response = self._call(prompt)
+        self.spent_usd += response.cost_usd
+        self.calls += 1
+
+        if self.cache is not None:
+            self.cache.put(self.model, prompt, MAX_TOKENS, response)
+        return response
 
     def _refuse_if_the_next_call_would_break_the_cap(self) -> None:
         """Stop *before* exceeding, not after.

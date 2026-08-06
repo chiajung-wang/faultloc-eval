@@ -35,6 +35,7 @@ from faultloc.reporting import (
     today,
 )
 from faultloc.repos import RepoStore
+from faultloc.response_cache import ResponseCache
 from faultloc.rungs import Prediction, Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
@@ -52,6 +53,18 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
+def _rerank(model: str) -> LlmRerankRung:
+    """A rung-3 cell with its response cache attached.
+
+    The cache is wired here rather than defaulted inside the rung so that
+    tests cannot write into the real cache directory by forgetting to pass
+    one. A run is 244 sequential calls over hours; without the cache, a
+    failure at 90% re-buys the first 90%.
+    """
+    return LlmRerankRung(model=MODELS[model], cache=ResponseCache())
+
+
 RUNGS: dict[str, Callable[[], Rung]] = {
     "bm25": Bm25Rung,
     "bm25-chunks": Bm25ChunksRung,
@@ -62,10 +75,10 @@ RUNGS: dict[str, Callable[[], Rung]] = {
     # `rerank` is ADR-0008's declared ladder row, named before any number
     # existed. The other three are the cross-model table and the reasoning
     # ablations, and are not the rung-3 headline whatever they score.
-    "rerank": partial(LlmRerankRung, model=MODELS["gpt-oss-high"]),
-    "rerank-gpt-oss-low": partial(LlmRerankRung, model=MODELS["gpt-oss-low"]),
-    "rerank-deepseek-off": partial(LlmRerankRung, model=MODELS["deepseek-off"]),
-    "rerank-deepseek-on": partial(LlmRerankRung, model=MODELS["deepseek-on"]),
+    "rerank": partial(_rerank, "gpt-oss-high"),
+    "rerank-gpt-oss-low": partial(_rerank, "gpt-oss-low"),
+    "rerank-deepseek-off": partial(_rerank, "deepseek-off"),
+    "rerank-deepseek-on": partial(_rerank, "deepseek-on"),
 }
 DEFAULT_RESULTS = Path("RESULTS.md")
 
@@ -194,8 +207,15 @@ def _run(engine: Rung, instances: Sequence[Instance]) -> list[Prediction]:
 
 
 def _failure_note(engine: Rung) -> str:
-    """The ways a rung silently kept its input ranking, if it counts them."""
-    counted = [
+    """What the entry has to admit about how its number was produced.
+
+    Two different things, deliberately worded apart. *Degraded* counts the ways
+    a rung silently kept its input ranking -- each one a route to looking like a
+    null result while having failed. *Replayed* is not a failure at all: it says
+    how much of the run came from cache rather than from fresh calls, which a
+    reader needs in order to read the cost column correctly.
+    """
+    degraded = [
         (label, getattr(engine, attribute, 0))
         for attribute, label in (
             ("unparseable", "unparseable replies"),
@@ -203,10 +223,16 @@ def _failure_note(engine: Rung) -> str:
             ("off_list", "off-list paths"),
         )
     ]
-    reported = [f"{count} {label}" for label, count in counted if count]
-    if not reported:
-        return ""
-    return f"Degraded: {', '.join(reported)}."
+    parts = []
+    reported = [f"{count} {label}" for label, count in degraded if count]
+    if reported:
+        parts.append(f"Degraded: {', '.join(reported)}.")
+
+    replayed = getattr(engine, "cache_hits", 0)
+    if replayed:
+        parts.append(f"Replayed {replayed} responses from cache; cost is what they cost to make.")
+
+    return " ".join(parts)
 
 
 @app.command()

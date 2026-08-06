@@ -183,3 +183,81 @@ class TestPrompt:
         assert "core is broken" in prompt
         assert "a.py" in prompt and "def a(): ..." in prompt
         assert "b.py" in prompt and "def b(): ..." in prompt
+
+
+class TestResponseCache:
+    """Resume, so a run that dies at 90% does not re-buy the first 90%."""
+
+    def test_a_cached_instance_is_not_asked_again(self, tmp_path) -> None:
+        from faultloc.response_cache import ResponseCache
+
+        calls: list[str] = []
+
+        def build() -> LlmRerankRung:
+            return LlmRerankRung(
+                candidates=StubCandidates(("a.py", "b.py")),
+                evidence=lambda instance, paths: {p: "body" for p in paths},
+                call=lambda prompt: calls.append(prompt) or reply("b.py\na.py"),
+                cache=ResponseCache(tmp_path),
+            )
+
+        build().predict(INSTANCE)
+        second = build()
+        prediction = second.predict(INSTANCE)
+
+        assert len(calls) == 1
+        assert prediction.ranked_files == ("b.py", "a.py")
+        assert second.cache_hits == 1
+
+    def test_a_cached_hit_costs_the_budget_nothing(self, tmp_path) -> None:
+        """The money was spent on the first run. Counting it again would abort
+        a resume against a cap that has not actually been reached."""
+        from faultloc.response_cache import ResponseCache
+
+        def build() -> LlmRerankRung:
+            return LlmRerankRung(
+                candidates=StubCandidates(("a.py",)),
+                evidence=lambda instance, paths: {p: "body" for p in paths},
+                call=lambda prompt: reply("a.py", cost=0.9),
+                cache=ResponseCache(tmp_path),
+                budget_usd=1.0,
+            )
+
+        build().predict(INSTANCE)
+        resumed = build()
+        resumed.predict(INSTANCE)
+
+        assert resumed.spent_usd == 0.0
+
+    def test_a_cached_hit_still_reports_what_it_cost_to_produce(self, tmp_path) -> None:
+        """The entry states what the number cost to make. A reader reproducing
+        it pays that, whether or not this machine had it cached."""
+        from faultloc.response_cache import ResponseCache
+
+        def build() -> LlmRerankRung:
+            return LlmRerankRung(
+                candidates=StubCandidates(("a.py",)),
+                evidence=lambda instance, paths: {p: "body" for p in paths},
+                call=lambda prompt: reply("a.py", cost=0.0042),
+                cache=ResponseCache(tmp_path),
+            )
+
+        build().predict(INSTANCE)
+        prediction = build().predict(INSTANCE)
+
+        assert prediction.cost_usd == pytest.approx(0.0042)
+
+    def test_no_cache_means_no_caching(self) -> None:
+        """Default off, so a test that forgets to pass one cannot quietly write
+        into the real cache directory."""
+        calls: list[str] = []
+        rung = LlmRerankRung(
+            candidates=StubCandidates(("a.py",)),
+            evidence=lambda instance, paths: {p: "body" for p in paths},
+            call=lambda prompt: calls.append(prompt) or reply("a.py"),
+        )
+        rung.predict(INSTANCE)
+        rung.predict(INSTANCE)
+
+        assert len(calls) == 2
+        assert rung.cache_hits == 0

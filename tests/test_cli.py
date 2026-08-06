@@ -52,3 +52,23 @@ class TestFailureNote:
         """Rungs 1 through 2.6 have no such counters, and `getattr` defaults
         must not turn that into a row of zeroes in every entry's note."""
         assert _failure_note(StubEngine()) == ""
+
+
+class TestCacheNote:
+    def test_replays_are_reported_but_not_called_a_degradation(self) -> None:
+        """A cache hit is not a failure. Filing it under 'Degraded' would make
+        a clean resumed run read as a broken one."""
+        note = _failure_note(StubEngine(unparseable=0, truncated=0, off_list=0, cache_hits=200))
+
+        assert "Degraded" not in note
+        assert "Replayed 200" in note
+
+    def test_a_run_that_both_degraded_and_replayed_says_both(self) -> None:
+        note = _failure_note(StubEngine(unparseable=2, truncated=0, off_list=9, cache_hits=110))
+
+        assert "2 unparseable replies" in note
+        assert "9 off-list paths" in note
+        assert "Replayed 110" in note
+
+    def test_a_fresh_clean_run_says_nothing(self) -> None:
+        assert _failure_note(StubEngine(unparseable=0, truncated=0, off_list=0, cache_hits=0)) == ""
