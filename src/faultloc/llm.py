@@ -17,12 +17,30 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+
+#: A dev-split run is 244 sequential calls. Without retries a single transient
+#: rate limit anywhere in it destroys the whole run and everything spent on it,
+#: which is what happened on M4's first full attempt: $2.25 for zero completed
+#: runs. Five attempts covers a provider quota window; more would mean the
+#: provider is down rather than busy.
+MAX_ATTEMPTS = 5
+
+#: Doubling from one second: 1, 2, 4, 8. Constant retries against a rate limit
+#: are just the same burst again, so the wait has to grow for the window to
+#: clear.
+BACKOFF_S = 1.0
+
+#: Busy, not broken. Everything else -- a malformed request, an unknown model,
+#: a provider policy rejection -- fails identically on every attempt, and
+#: retrying it burns the rate limit that the real calls need.
+RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
 
 
 class MissingKeyError(RuntimeError):
@@ -133,6 +151,45 @@ class Response:
         return self.finish_reason == "length"
 
 
+def _send(request: urllib.request.Request, *, timeout: float) -> dict:
+    """One request, retried while the provider is merely busy.
+
+    Retries only the statuses that mean *try again*. A 400 or a 404 fails the
+    same way every time -- retrying those would burn the rate limit that the
+    calls still to come depend on.
+    """
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as raw:
+                return json.load(raw)
+        except urllib.error.HTTPError as failed:
+            last = attempt == MAX_ATTEMPTS - 1
+            if failed.code not in RETRYABLE or last:
+                # The body carries the reason; the status line does not. A 404
+                # here usually means the account's provider policy excludes
+                # every serve of this model, which reads nothing like
+                # "Not Found".
+                raise RuntimeError(f"openrouter {failed.code}: {_reason(failed)}") from failed
+            time.sleep(_wait(failed, attempt))
+
+    raise AssertionError("unreachable: the final attempt either returns or raises")
+
+
+def _wait(failed: urllib.error.HTTPError, attempt: int) -> float:
+    """How long before trying again.
+
+    `Retry-After` wins when the provider sends one: it knows when its window
+    resets, and guessing shorter wastes an attempt.
+    """
+    header = failed.headers.get("Retry-After") if failed.headers else None
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    return BACKOFF_S * 2**attempt
+
+
 def _reason(failed: urllib.error.HTTPError) -> str:
     """The API's own explanation, or the raw body if it is not JSON."""
     body = failed.read().decode(errors="replace")
@@ -175,14 +232,7 @@ def call(model: Model, prompt: str, *, max_tokens: int, timeout: float = 180.0) 
         data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as raw:
-            payload = json.load(raw)
-    except urllib.error.HTTPError as failed:
-        # The body carries the reason; the status line does not. A 404 here
-        # usually means the account's provider policy excludes every serve of
-        # this model, which reads nothing like "Not Found".
-        raise RuntimeError(f"openrouter {failed.code}: {_reason(failed)}") from failed
+    payload = _send(request, timeout=timeout)
 
     if "error" in payload:
         raise RuntimeError(f"openrouter: {payload['error']}")
