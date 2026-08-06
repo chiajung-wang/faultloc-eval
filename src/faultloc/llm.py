@@ -83,22 +83,27 @@ class Model:
 #: while DeepSeek's is off-against-on. Each pair moves one variable; the two
 #: pairs are not comparable to each other, and the ADR says so.
 #:
-#: gpt-oss routes to Cerebras, measured at 722 tok/s against DeepInfra's 40 --
-#: 18x, which is the difference between a 40-minute run and a seven-hour one.
+#: gpt-oss routes to Groq. Cerebras was faster still -- 722 tok/s against 198 --
+#: but **enforces an 8,192-token completion limit while advertising 40,960**,
+#: and high effort needs 7,300-8,200 tokens on this prompt. It therefore
+#: truncated a third of replies, and a truncated reply degrades to the input
+#: ranking, which would have published as "the model did not help" when the
+#: model never answered. Speed is worthless if the answer is cut off.
+#:
 #: Precision is not the trade it looks like: `gpt-oss-120b` ships *natively* in
-#: MXFP4, so every 16-bit endpoint is upcasting already-4-bit weights, and the
-#: fp4 endpoints measured slower than bf16 anyway. Speed here is hardware.
+#: MXFP4, so every 16-bit endpoint is upcasting already-4-bit weights. Groq
+#: reporting `unknown` quantization costs less than it appears to.
 MODELS = {
     "gpt-oss-low": Model(
         label="gpt-oss-low",
         name="openai/gpt-oss-120b",
-        provider="cerebras/fp16",
+        provider="groq",
         reasoning={"effort": "low"},
     ),
     "gpt-oss-high": Model(
         label="gpt-oss-high",
         name="openai/gpt-oss-120b",
-        provider="cerebras/fp16",
+        provider="groq",
         reasoning={"effort": "high"},
     ),
     "deepseek-off": Model(

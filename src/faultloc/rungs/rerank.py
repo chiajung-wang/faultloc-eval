@@ -34,10 +34,16 @@ from faultloc.rungs import Prediction, Rung, StopCondition
 from faultloc.rungs.cross_encoder import TOP_K, EvidenceSource
 from faultloc.rungs.hybrid import HybridRung
 
-#: Output budget per call. Generous on purpose: at 50 tokens `gpt-oss-120b`
-#: spent 45 reasoning and returned empty content. Reasoning bills as output, so
-#: this is the ceiling on a cell's price as much as on its answer.
-MAX_TOKENS = 4000
+#: Output budget per call, sized from measurement rather than from a guess at a
+#: trivial prompt. On the real prompt, measured maxima are 8,192 for gpt-oss at
+#: high effort, 3,723 for DeepSeek reasoning, and 229 with reasoning disabled.
+#:
+#: The first value here was 4,000, chosen after a *toy* prompt showed 50 tokens
+#: was too few. On the real one that truncated 37 of the ladder row's first 40
+#: replies -- and because a truncated reply degrades to the input ranking, the
+#: run was quietly reproducing fusion's order while looking like it worked.
+#: Roughly double the observed maximum, so ordinary variance cannot reach it.
+MAX_TOKENS = 16000
 
 #: ADR-0008's per-run cap, raised from $1.50 when gpt-oss moved to Cerebras:
 #: 10x the speed costs 5x the tokens' price, putting that cell near $1.29 on a
