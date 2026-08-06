@@ -21,7 +21,8 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
+
+from faultloc.env import load_env
 
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -47,27 +48,15 @@ class MissingKeyError(RuntimeError):
     """No API key. Named separately so the failure reads as setup, not a bug."""
 
 
-def api_key(env_file: Path = Path(".env")) -> str:
-    """The OpenRouter key, from the environment or from `.env`.
-
-    `.env.sample` tells a reader to copy it to `.env`; without this that
-    instruction would be false. Deliberately not `python-dotenv` -- six lines
-    against a dependency for one variable. The environment wins, so a key
-    exported for one run cannot be silently overridden by a stale file.
-    """
+def api_key() -> str:
+    """The OpenRouter key, from the environment or from `.env`."""
+    load_env()
     key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if key:
-        return key
-
-    if env_file.is_file():
-        for line in env_file.read_text().splitlines():
-            name, _, value = line.partition("=")
-            if name.strip() == "OPENROUTER_API_KEY":
-                key = value.strip().strip("'\"")
-                if key:
-                    return key
-
-    raise MissingKeyError("OPENROUTER_API_KEY is not set; copy .env.sample to .env and fill it in")
+    if not key:
+        raise MissingKeyError(
+            "OPENROUTER_API_KEY is not set; copy .env.sample to .env and fill it in"
+        )
+    return key
 
 
 @dataclass(frozen=True)

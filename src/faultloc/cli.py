@@ -24,6 +24,7 @@ from faultloc.embedding import (
     build_index,
     load_encoder,
 )
+from faultloc.env import load_env
 from faultloc.llm import MODELS
 from faultloc.reporting import (
     Provenance,
@@ -42,6 +43,8 @@ from faultloc.rungs.embed import EmbedRung
 from faultloc.rungs.hybrid import HybridRung
 from faultloc.rungs.rerank import BudgetExceededError, LlmRerankRung
 from faultloc.scoring import score, top_1_hit
+
+load_env()
 
 app = typer.Typer(
     name="faultloc",
