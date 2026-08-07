@@ -1,6 +1,6 @@
 # 03 — Rung 3 end to end, one model
 
-Status: ready-for-agent
+Status: done
 
 ## Parent
 
@@ -20,16 +20,16 @@ The budget cap is enforced here too: a run that would exceed it stops with a cle
 
 ## Acceptance criteria
 
-- [ ] `faultloc evaluate --rung rerank --split dev` runs end to end and emits a `RESULTS.md` entry
-- [ ] `cost_usd` is read from the model response's token usage, per instance
-- [ ] `latency_s` measured per instance and reported alongside cost
-- [ ] The determinism decision from ADR-0008 implemented and pinned by a test
-- [ ] A cache built by a different model or prompt is refused, not silently reused
-- [ ] Hard spend cap stops a run before exceeding it
-- [ ] A malformed or unparseable model response degrades to the input ranking rather than crashing the run, and is counted
-- [ ] Candidate union identical to issue 01's, so the ceiling measured there still applies
-- [ ] Tests make no network calls — the model client is injectable, as the encoder is at rung 2
-- [ ] `uv run pytest` and `uv run ruff check` clean
+- [x] `faultloc evaluate --rung rerank --split dev` runs end to end and emits a `RESULTS.md` entry
+- [x] `cost_usd` is read from the model response's token usage, per instance
+- [x] `latency_s` measured per instance and reported alongside cost
+- [x] The determinism decision from ADR-0008 implemented and pinned by a test
+- [x] A cache built by a different model or prompt is refused, not silently reused
+- [x] Hard spend cap stops a run before exceeding it
+- [x] A malformed or unparseable model response degrades to the input ranking rather than crashing the run, and is counted
+- [x] Candidate union identical to issue 01's, so the ceiling measured there still applies
+- [x] Tests make no network calls — the model client is injectable, as the encoder is at rung 2
+- [x] `uv run pytest` and `uv run ruff check` clean
 
 ## Notes
 
@@ -97,3 +97,57 @@ OpenRouter returns actual `cost` per request with `"usage": {"include": true}`. 
 ### Still a guess
 
 ADR-0008's 2,000-reasoning-tokens-per-instance estimate is unchanged by any of this. A trivial prompt drew 113 at high effort; the real prompt is 4,886 tokens with twenty candidates to weigh. The $1.50 per-run cap is what makes the guess safe — measure it on the first batch and replace it.
+
+**Closed 2026-08-07.** Four cells scored on the dev split, n=244 each.
+
+**Spend: $1.95 in published rows, $5.59 on the account.** The gap — **$3.64, nearly two thirds of the total** — went to abandoned runs and the route hunt: $2.25 on a first attempt that completed nothing, $0.63 on a Groq run killed at instance 110, and the rest on probes that established the provider limits. The four numbers below cost $1.95; finding out how to obtain them cost almost twice that.
+
+ADR-0008 set a $5.00 milestone cap and the $2.25 was re-based to setup partway through, by agreement, on the grounds that it produced no number and everything it did produce is now code. Against the re-based budget the milestone spent $3.18 of $5.00. Against the original cap it did not fit, which is the more honest way to read it.
+
+| Row | Top-1 | Recall@3 | Recall@5 | Cost | Wall clock |
+|---|---|---|---|---|---|
+| `rerank-deepseek-on` | 79.1% (73.6–83.7) | 83.9% | 84.6% | $0.49 | 178m |
+| `rerank-deepseek-off` | 75.0% (69.2–80.0) | 82.8% | 85.7% | $0.31 | 22m |
+| **`rerank`** — ladder row | **74.2% (68.3–79.3)** | 81.8% | 85.3% | $0.39 | 186m |
+| `rerank-gpt-oss-low` | 72.5% (66.6–77.8) | 81.1% | 83.3% | $0.76 | 9m |
+| `hybrid` (rung 2.5) | 45.5% (39.4–51.8) | 65.2% | 73.1% | $0.00 | — |
+
+### Every cell beats fusion decisively; none beats another
+
+The four span 72.5–79.1% with intervals overlapping almost entirely, against fusion's 45.5% which none of them touch. **An 11.8× price difference and a reasoning-effort ablation both produce nothing distinguishable at n=244.**
+
+That is the outcome ADR-0008's first amendment was designed to make readable: the original model pair sat 1.5pp apart on a benchmark, against this project's ±6pp interval, so the table could only ever have said "indistinguishable" without anyone being able to tell whether that meant anything. Widening the price span to 11.8× means the null result is now informative — paying more does not buy accuracy *here*, and the measurement was capable of showing otherwise.
+
+**High reasoning effort lost on cost-effectiveness to its own model at low effort**: 74.2% for $0.39 against 72.5% for $0.76 — 1.7pp inside a ±6pp interval, for roughly 7,000 extra reasoning tokens per instance. The ladder row was declared in advance and stays the ladder row; it simply did not earn its reasoning.
+
+### Sphinx sits on its ceiling in all four
+
+63.6% in every cell — exactly the union Candidate Set's hit@20 for sphinx from issue 01. Four models, three providers, one number. Every one of them picks correctly on **every sphinx instance where the answer was retrievable at all**; its remaining loss is entirely retrieval's, not ranking's.
+
+Rung 2.6 is the contrast that makes the point: the cross-encoder scored **18.2%** on sphinx, well under the same ceiling. Sphinx is not simply "the repo where the ceiling binds" — it is a repo where reading twenty candidates together in language solves what scoring them one at a time does not.
+
+### Three disclosures that belong beside these numbers
+
+**The ladder row fell back to fusion on 7% of instances.** 17 of 244 replies were unparseable, nearly all empty content — some flagged `finish=length`, but four returned empty with `finish=stop`, which the truncation check cannot see. Those instances kept fusion's ranking, so the published 74.2% is depressed by a serving quirk rather than by the model. Cached responses make this recoverable later without re-paying for the other 227.
+
+**The low-vs-high ablation moves three variables, not one.** `rerank-gpt-oss-low` ran at `72ed477` on Cerebras; `rerank` at `6fad58d` on DeepInfra. Route, commit and effort all differ, so the 1.7pp gap cannot be attributed to effort. Accepted deliberately rather than re-run.
+
+**`rerank-deepseek-on` stamps a commit made during its run.** It loaded `3418386` and stamps `b46e55c`; `src/` changed between them. Checked rather than assumed: its model spec, `MAX_TOKENS` and `_parse` are byte-identical across those commits, and the changes were the response cache, retry patience and the gpt-oss route — none of which touch this cell. The number reproduces; the entry's claim is imprecise, not wrong.
+
+### What the runs cost in engineering, and what that bought
+
+Four cells, four routes, three genuine bugs found by the degrade counters rather than by tests:
+
+- **Cerebras enforces an 8,192-token completion limit while advertising 40,960.** High effort needs 7,300–8,200, so it truncated a third of replies. Caught at instance 40 of a run that would have published a plausible number produced entirely by fusion.
+- **`MAX_TOKENS` was sized from a toy prompt.** 4,000 was chosen because 50 was too few; the real prompt needs four times that.
+- **Retries watched only one of three places a failure arrives.** HTTP status, then a `504` inside a `200` body, then transport-level disconnects and read timeouts — each one killed a run before being handled. The last is still open as a follow-up.
+
+The counters earned their existence. Every one of these failures produces *a ranking*, so a run that hit them looked healthy in every metric except the one that says how often the model actually answered.
+
+### For M5
+
+**92 off-list paths across the four cells** — files named that were never candidates: 6 for gpt-oss at high effort, 14 for DeepSeek reasoning, 29 for gpt-oss at low effort, and 43 for DeepSeek with reasoning disabled. That is the first sizing evidence for the Path Guardrail, and the spread is the interesting part: **the two configurations that reason least hallucinate most**, by roughly seven to one over the most deliberate one.
+
+**Recall@5 barely exceeds Recall@3 in every cell** (85.3% against 81.8% for the ladder row, with Top-1 at 74.2%). These models are decisive: when they are right, they are right at rank 1. An escalation strategy assuming the answer is "somewhere near the top" has less to work with than the ceiling suggests.
+
+**The remaining headroom is retrieval, not ranking.** Issue 01's ceiling is 88.9%; the best cell reaches 79.1%. Sphinx demonstrates the shape of what is left — the answer has to be *in the list* before any amount of reasoning helps.
