@@ -7,7 +7,7 @@ results. Logic lives in the package, so it stays testable without a subprocess.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Annotated
@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from faultloc import __version__
+from faultloc.dataset.models import Instance
 from faultloc.dataset.splits import load_splits
 from faultloc.dataset.verified import DATASET_ID, DATASET_REVISION, load_verified_set
 from faultloc.embedding import (
@@ -23,6 +24,8 @@ from faultloc.embedding import (
     build_index,
     load_encoder,
 )
+from faultloc.env import load_env
+from faultloc.llm import MODELS
 from faultloc.reporting import (
     Provenance,
     code_version,
@@ -32,11 +35,17 @@ from faultloc.reporting import (
     today,
 )
 from faultloc.repos import RepoStore
-from faultloc.rungs import Rung
+from faultloc.response_cache import ResponseCache
+from faultloc.rungs import Prediction, Rung
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
+from faultloc.rungs.cross_encoder import CrossEncoderRung
 from faultloc.rungs.embed import EmbedRung
-from faultloc.scoring import score
+from faultloc.rungs.hybrid import HybridRung
+from faultloc.rungs.rerank import BudgetExceededError, LlmRerankRung
+from faultloc.scoring import score, top_1_hit
+
+load_env()
 
 app = typer.Typer(
     name="faultloc",
@@ -44,11 +53,32 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
+def _rerank(model: str) -> LlmRerankRung:
+    """A rung-3 cell with its response cache attached.
+
+    The cache is wired here rather than defaulted inside the rung so that
+    tests cannot write into the real cache directory by forgetting to pass
+    one. A run is 244 sequential calls over hours; without the cache, a
+    failure at 90% re-buys the first 90%.
+    """
+    return LlmRerankRung(model=MODELS[model], cache=ResponseCache())
+
+
 RUNGS: dict[str, Callable[[], Rung]] = {
     "bm25": Bm25Rung,
     "bm25-chunks": Bm25ChunksRung,
     "bm25-chunks-bodies": partial(Bm25ChunksRung, include_bodies=True),
     "embed": EmbedRung,
+    "hybrid": HybridRung,
+    "cross-encoder": CrossEncoderRung,
+    # `rerank` is ADR-0008's declared ladder row, named before any number
+    # existed. The other three are the cross-model table and the reasoning
+    # ablations, and are not the rung-3 headline whatever they score.
+    "rerank": partial(_rerank, "gpt-oss-high"),
+    "rerank-gpt-oss-low": partial(_rerank, "gpt-oss-low"),
+    "rerank-deepseek-off": partial(_rerank, "deepseek-off"),
+    "rerank-deepseek-on": partial(_rerank, "deepseek-on"),
 }
 DEFAULT_RESULTS = Path("RESULTS.md")
 
@@ -107,6 +137,104 @@ def index(
     typer.echo(f"  cost        ${report.cost_usd:.2f}")
 
 
+#: Instances between progress lines. Every instance is too noisy to tail for
+#: 244 of them; every 25 leaves a rung-3 run silent for two minutes at a time.
+PROGRESS_EVERY = 10
+
+
+def _progress_line(
+    done: int,
+    total: int,
+    hits: int,
+    spent: float,
+    cap: float,
+    elapsed_s: float,
+    degraded: tuple[int, int, int],
+) -> str:
+    """One status line for a run in flight.
+
+    Running Top-1 is here to catch a broken run early rather than after an
+    hour: a rung whose replies are all failing degrades to its input ranking,
+    so its accuracy tracks the rung below it from the first ten instances.
+    """
+    pace = elapsed_s / done if done else 0.0
+    eta_m = pace * (total - done) / 60
+    budget = f"${spent:.3f}/${cap:.2f}" if cap else f"${spent:.2f}"
+    return (
+        f"[{done:>4}/{total}] {done / total:>4.0%}   "
+        f"top-1 {hits / done:>5.1%}   {budget}   "
+        f"{pace:.1f}s/inst   eta {eta_m:.0f}m   "
+        f"degraded {degraded[0]}/{degraded[1]}/{degraded[2]}"
+    )
+
+
+def _run(engine: Rung, instances: Sequence[Instance]) -> list[Prediction]:
+    """Predict every instance, reporting progress as it goes.
+
+    Progress is echoed rather than rendered with a live display: a long run is
+    detached with its output redirected, where a terminal-only progress bar
+    prints nothing at all. `nl` forces a flush so `tee` shows it live instead
+    of holding it in a pipe buffer.
+    """
+    predictions: list[Prediction] = []
+    started = time.perf_counter()
+    hits = 0
+
+    for done, instance in enumerate(instances, 1):
+        prediction = engine.predict(instance)
+        predictions.append(prediction)
+        hits += top_1_hit(prediction, instance)
+
+        if done % PROGRESS_EVERY == 0 or done == len(instances):
+            typer.echo(
+                _progress_line(
+                    done,
+                    len(instances),
+                    hits,
+                    sum(p.cost_usd for p in predictions),
+                    getattr(engine, "budget_usd", 0.0),
+                    time.perf_counter() - started,
+                    (
+                        getattr(engine, "unparseable", 0),
+                        getattr(engine, "truncated", 0),
+                        getattr(engine, "off_list", 0),
+                    ),
+                ),
+                nl=True,
+            )
+
+    return predictions
+
+
+def _failure_note(engine: Rung) -> str:
+    """What the entry has to admit about how its number was produced.
+
+    Two different things, deliberately worded apart. *Degraded* counts the ways
+    a rung silently kept its input ranking -- each one a route to looking like a
+    null result while having failed. *Replayed* is not a failure at all: it says
+    how much of the run came from cache rather than from fresh calls, which a
+    reader needs in order to read the cost column correctly.
+    """
+    degraded = [
+        (label, getattr(engine, attribute, 0))
+        for attribute, label in (
+            ("unparseable", "unparseable replies"),
+            ("truncated", "truncated replies"),
+            ("off_list", "off-list paths"),
+        )
+    ]
+    parts = []
+    reported = [f"{count} {label}" for label, count in degraded if count]
+    if reported:
+        parts.append(f"Degraded: {', '.join(reported)}.")
+
+    replayed = getattr(engine, "cache_hits", 0)
+    if replayed:
+        parts.append(f"Replayed {replayed} responses from cache; cost is what they cost to make.")
+
+    return " ".join(parts)
+
+
 @app.command()
 def evaluate(
     rung: Annotated[
@@ -144,7 +272,14 @@ def evaluate(
     # the blob-keyed token cache, and with it the 21x content reuse measured in
     # issue 04 -- the difference between 80 seconds and half an hour.
     engine = RUNGS[rung]()
-    predictions = [engine.predict(instance) for instance in instances]
+    try:
+        predictions = _run(engine, instances)
+    except BudgetExceededError as stopped:
+        # No entry, no partial score. A run that stopped early was scored on a
+        # different instance set, which is exactly what `--limit` refuses to
+        # publish for.
+        raise typer.BadParameter(f"budget cap reached: {stopped}") from stopped
+
     report = score(predictions, instances, rung=rung, split=split)
     wall_clock = time.perf_counter() - started
 
@@ -160,6 +295,12 @@ def evaluate(
     )
 
     typer.echo(render_terminal(report, provenance, loaded.report, wall_clock))
+
+    # Rung 3's failure modes all leave a *ranking* behind -- the one it was
+    # handed -- so a run that failed everywhere scores like the rung below it
+    # and reads as a null result. The counts go in the entry's note so the
+    # number can never be published without them.
+    note = " ".join(part for part in (note, _failure_note(engine)) if part)
 
     # A truncated run is not the benchmark. Letting `--limit` write an entry
     # would put a number scored on a different instance set into a log whose

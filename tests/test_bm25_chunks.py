@@ -13,12 +13,69 @@ chunks matched.
 
 from __future__ import annotations
 
-from conftest import Fixture
+import subprocess
+from pathlib import Path
+
+import pytest
+from conftest import Fixture, git
 
 from faultloc.dataset.models import Instance
-from faultloc.rungs import StopCondition
+from faultloc.repos import RepoStore
+from faultloc.rungs import StopCondition, bm25_chunks
 from faultloc.rungs.bm25 import Bm25Rung
 from faultloc.rungs.bm25_chunks import Bm25ChunksRung
+
+
+@pytest.fixture
+def multi_chunk(tmp_path: Path) -> Fixture:
+    """A repo whose one interesting file holds two unrelated definitions.
+
+    The shared `repo` fixture gives every file a single chunk, which cannot
+    distinguish "returns the file's best chunk" from "returns its only chunk".
+
+    The filler modules are not padding. BM25's IDF is zero for a term appearing
+    in half the corpus, so in a two-chunk repository every score ties and the
+    argmax is whatever came first -- the caveat this module's docstring already
+    records. Enough distinct chunks and the discriminating term earns its
+    weight back.
+    """
+    work = tmp_path / "work"
+    (work / "pkg").mkdir(parents=True)
+    git("init", "-q", "-b", "main", cwd=work)
+    git("config", "user.email", "t@example.com", cwd=work)
+    git("config", "user.name", "Test", cwd=work)
+
+    (work / "pkg" / "core.py").write_text(
+        "def parse_header(stream):\n"
+        '    """Read the leading bytes of a stream."""\n'
+        "    return stream.read(8)\n"
+        "\n"
+        "def align_widget(widget):\n"
+        '    """Correct a widget alignment."""\n'
+        "    return widget.align()\n"
+    )
+    for n, subject in enumerate(("socket", "cursor", "palette", "buffer", "registry", "clock")):
+        (work / "pkg" / f"mod_{n}.py").write_text(
+            f"def open_{subject}(target):\n"
+            f'    """Open a {subject} for the given target."""\n'
+            f"    return target.{subject}\n"
+        )
+    git("add", "-A", cwd=work)
+    git("commit", "-qm", "first", cwd=work)
+    head = git("rev-parse", "HEAD", cwd=work)
+
+    root = tmp_path / "repos"
+    root.mkdir()
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(work), str(root / "acme__widget.git")],
+        check=True,
+    )
+
+    return Fixture(
+        store=RepoStore(root=root, cache_root=tmp_path / "cache"),
+        first=head,
+        second=head,
+    )
 
 
 def instance(repo_fixture: Fixture, issue_text: str, commit: str | None = None) -> Instance:
@@ -117,3 +174,75 @@ class TestBlobReuse:
             f.blob for f in repo.store.list_files(repo.repo, repo.first) if f.path == "pkg/core.py"
         )
         assert not any("pkg/core.py" in tokens for tokens in rung._chunks_by_blob[blob])
+
+
+class TestEvidenceChunks:
+    """The Evidence Chunk: the chunk a file scored as, kept rather than
+    discarded so rung 2.6 and rung 3 can show a model *why* a file is a
+    candidate."""
+
+    def test_returns_the_text_that_was_scored(self, repo: Fixture) -> None:
+        rung = Bm25ChunksRung(repo.store)
+        evidence = rung.evidence(instance(repo, "core is broken"), ("pkg/core.py",))
+
+        assert "first" in evidence["pkg/core.py"]
+
+    def test_picks_the_chunk_the_file_scored_as(self, multi_chunk: Fixture) -> None:
+        """The crux. A file with several definitions must surrender the one the
+        retriever matched on, not whichever happened to be parsed first --
+        otherwise the model is shown code the retriever never looked at."""
+        rung = Bm25ChunksRung(multi_chunk.store, include_bodies=True)
+        evidence = rung.evidence(instance(multi_chunk, "widget alignment"), ("pkg/core.py",))
+
+        assert "align_widget" in evidence["pkg/core.py"]
+        assert "parse_header" not in evidence["pkg/core.py"]
+
+    def test_asking_for_an_unknown_path_yields_nothing_rather_than_raising(
+        self, repo: Fixture
+    ) -> None:
+        """A candidate list can name a path the lexical rung never ranked --
+        the dense retriever contributes to the union too. Dropping it here
+        would shrink the list the ceiling was measured on."""
+        rung = Bm25ChunksRung(repo.store)
+        evidence = rung.evidence(instance(repo, "x"), ("pkg/core.py", "pkg/ghost.py"))
+
+        assert evidence["pkg/ghost.py"] == ""
+
+    def test_scores_the_repository_once_for_a_prediction_and_its_evidence(
+        self, repo: Fixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`HybridRung` asks for the ranking and rung 2.6 then asks for the
+        Evidence Chunks of the same instance. Running BM25 over the repository
+        twice for one prediction is pure waste, and at 244 instances it is
+        minutes."""
+        built = []
+        original = bm25_chunks.BM25Okapi
+        monkeypatch.setattr(
+            bm25_chunks, "BM25Okapi", lambda corpus: built.append(1) or original(corpus)
+        )
+
+        rung = Bm25ChunksRung(repo.store)
+        subject = instance(repo, "core is broken")
+
+        rung.predict(subject)
+        rung.evidence(subject, ("pkg/core.py",))
+
+        assert len(built) == 1
+
+    def test_a_second_instance_is_scored_afresh(
+        self, repo: Fixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The memo holds one instance. If it keyed on nothing, the second
+        instance would be handed the first one's evidence -- a wrong answer
+        that looks like a working cache."""
+        built = []
+        original = bm25_chunks.BM25Okapi
+        monkeypatch.setattr(
+            bm25_chunks, "BM25Okapi", lambda corpus: built.append(1) or original(corpus)
+        )
+
+        rung = Bm25ChunksRung(repo.store)
+        rung.predict(instance(repo, "core is broken"))
+        rung.predict(instance(repo, "util is broken", commit=repo.second))
+
+        assert len(built) == 2

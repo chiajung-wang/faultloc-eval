@@ -18,6 +18,7 @@ chunk or an embedding instead of recomputing it per instance.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -240,7 +241,11 @@ class RepoStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = [{"path": f.path, "blob": f.blob} for f in files]
         # Write then rename: an interrupted run must not leave a half-written
-        # cache entry that later reads would treat as complete.
-        tmp = path.with_suffix(".json.tmp")
+        # cache entry that later reads would treat as complete. The temp name
+        # carries the pid because M4 runs four evaluations at once against this
+        # cache -- a shared temp name lets one process rename another's
+        # half-written file, which is the corruption the rename exists to
+        # prevent. `replace` is atomic, so concurrent renames are safe.
+        tmp = path.with_suffix(f".json.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(payload))
         tmp.replace(path)

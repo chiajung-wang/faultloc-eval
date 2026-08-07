@@ -8,6 +8,138 @@ Top-1 is reported with a 95% Wilson interval. At these sample sizes a small
 difference between two rungs or two repositories is not yet a result, and the
 interval is what says so.
 
+## 2026-08-07 · rerank · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 74.2% (95% CI 68.3%-79.3%) |
+| Recall@3 | 81.8% |
+| Recall@5 | 85.3% |
+| Instances scored | 244 |
+| Wall clock | 186m 24s |
+| Cost | $0.39 ($0.0016/instance) |
+
+**Per repo** — django 113 @ 73.5% · sympy 36 @ 63.9% · sphinx 22 @ 63.6% · matplotlib 17 @ 88.2% · scikit-learn 16 @ 93.8% · xarray 11 @ 72.7% · astropy 10 @ 80.0% · pytest 10 @ 70.0% · requests 4 @ 100.0% · pylint 4 @ 75.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `6fad58d` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung rerank --split dev`
+
+**Read**: Degraded: 17 unparseable replies, 13 truncated replies, 6 off-list paths. Replayed 162 responses from cache; cost is what they cost to make.
+
+## 2026-08-06 · rerank-deepseek-on · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 79.1% (95% CI 73.6%-83.7%) |
+| Recall@3 | 83.9% |
+| Recall@5 | 84.6% |
+| Instances scored | 244 |
+| Wall clock | 178m 24s |
+| Cost | $0.49 ($0.0020/instance) |
+
+**Per repo** — django 113 @ 80.5% · sympy 36 @ 72.2% · sphinx 22 @ 63.6% · matplotlib 17 @ 76.5% · scikit-learn 16 @ 93.8% · xarray 11 @ 90.9% · astropy 10 @ 90.0% · pytest 10 @ 80.0% · requests 4 @ 75.0% · pylint 4 @ 75.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `b46e55c` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung rerank-deepseek-on --split dev`
+
+**Read**: Degraded: 3 truncated replies, 14 off-list paths.
+
+## 2026-08-06 · rerank-deepseek-off · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 75.0% (95% CI 69.2%-80.0%) |
+| Recall@3 | 82.8% |
+| Recall@5 | 85.7% |
+| Instances scored | 244 |
+| Wall clock | 21m 44s |
+| Cost | $0.31 ($0.0013/instance) |
+
+**Per repo** — django 113 @ 75.2% · sympy 36 @ 66.7% · sphinx 22 @ 63.6% · matplotlib 17 @ 76.5% · scikit-learn 16 @ 93.8% · xarray 11 @ 90.9% · astropy 10 @ 90.0% · pytest 10 @ 90.0% · requests 4 @ 50.0% · pylint 4 @ 25.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `abc06ee` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung rerank-deepseek-off --split dev`
+
+**Read**: Degraded: 1 unparseable replies, 43 off-list paths.
+
+## 2026-08-06 · rerank-gpt-oss-low · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 72.5% (95% CI 66.6%-77.8%) |
+| Recall@3 | 81.1% |
+| Recall@5 | 83.3% |
+| Instances scored | 244 |
+| Wall clock | 9m 02s |
+| Cost | $0.76 ($0.0031/instance) |
+
+**Per repo** — django 113 @ 73.5% · sympy 36 @ 61.1% · sphinx 22 @ 63.6% · matplotlib 17 @ 70.6% · scikit-learn 16 @ 93.8% · xarray 11 @ 81.8% · astropy 10 @ 90.0% · pytest 10 @ 70.0% · requests 4 @ 50.0% · pylint 4 @ 75.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `72ed477` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung rerank-gpt-oss-low --split dev`
+
+**Read**: Degraded: 29 off-list paths.
+
+## 2026-08-05 · cross-encoder · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 26.6% (95% CI 21.5%-32.5%) |
+| Recall@3 | 42.8% |
+| Recall@5 | 52.6% |
+| Instances scored | 244 |
+| Wall clock | 61m 12s |
+| Cost | $0.00 ($0.0000/instance) |
+
+**Per repo** — django 113 @ 26.5% · sympy 36 @ 30.6% · sphinx 22 @ 18.2% · matplotlib 17 @ 52.9% · scikit-learn 16 @ 18.8% · xarray 11 @ 18.2% · astropy 10 @ 20.0% · pytest 10 @ 10.0% · requests 4 @ 50.0% · pylint 4 @ 25.0% · other 1 @ 0.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `89da23c` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung cross-encoder --split dev`
+
+**Read**: _(not recorded)_
+
+## 2026-08-05 · hybrid · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 45.5% (95% CI 39.4%-51.8%) |
+| Recall@3 | 65.2% |
+| Recall@5 | 73.1% |
+| Instances scored | 244 |
+| Wall clock | 4m 10s |
+| Cost | $0.00 ($0.0000/instance) |
+
+**Per repo** — django 113 @ 41.6% · sympy 36 @ 41.7% · sphinx 22 @ 36.4% · matplotlib 17 @ 47.1% · scikit-learn 16 @ 68.8% · xarray 11 @ 45.5% · astropy 10 @ 80.0% · pytest 10 @ 60.0% · requests 4 @ 25.0% · pylint 4 @ 25.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 244
+
+**Provenance**
+- code `0f3389b` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung hybrid --split dev`
+
+**Read**: Rank fusion of the lexical and dense rungs, no model. The comparison point rung 3 must beat.
+
 ## 2026-08-04 · embed · dev
 
 | Metric | Value |
