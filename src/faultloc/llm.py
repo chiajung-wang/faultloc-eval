@@ -15,6 +15,7 @@ on its own merits, where tool-calling is the thing being bought.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import time
@@ -56,6 +57,18 @@ RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
 #: tail runs well past twice the mean. A timeout shorter than the slowest
 #: route turns a working provider into a broken one.
 DEFAULT_TIMEOUT_S = 900.0
+
+#: Failures that arrive as a dead connection rather than a response. The
+#: ladder row's log showed two `openrouter 503`s against four crashes: the
+#: other two were these, killing a 244-call run without retrying once.
+#: `URLError` is last because `HTTPError` subclasses it -- see `_send`.
+TRANSPORT_FAILURES = (
+    TimeoutError,
+    ConnectionError,
+    http.client.IncompleteRead,
+    http.client.RemoteDisconnected,
+    urllib.error.URLError,
+)
 
 
 class MissingKeyError(RuntimeError):
@@ -193,6 +206,17 @@ def _send(request: urllib.request.Request, *, timeout: float) -> dict:
                 # "Not Found".
                 raise RuntimeError(f"openrouter {failed.code}: {_reason(failed)}") from failed
             time.sleep(_wait(failed, attempt))
+            continue
+        except TRANSPORT_FAILURES as dropped:
+            # The third place a failure arrives, and the only one that leaves
+            # nothing to inspect: the connection died or the read timed out, so
+            # there is no status and no body to reason about. Caught *after*
+            # HTTPError deliberately -- HTTPError subclasses URLError, so the
+            # other order would swallow every status code and retry a 400 eight
+            # times instead of raising at once.
+            if last:
+                raise RuntimeError(f"openrouter transport: {dropped}") from dropped
+            time.sleep(min(BACKOFF_S * 2**attempt, MAX_BACKOFF_S))
             continue
 
         error = payload.get("error")

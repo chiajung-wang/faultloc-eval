@@ -11,6 +11,7 @@ $2.25 for zero completed runs.
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import urllib.error
@@ -63,7 +64,10 @@ def no_network(monkeypatch: pytest.MonkeyPatch):
         def fake_urlopen(request, timeout=None):
             calls.append(json.loads(request.data))
             outcome = remaining.pop(0)
-            if isinstance(outcome, urllib.error.HTTPError):
+            # Any exception, not just HTTPError: transport failures arrive as
+            # TimeoutError and friends, and a fixture that only raised status
+            # errors could not express them.
+            if isinstance(outcome, BaseException):
                 raise outcome
             return outcome
 
@@ -220,3 +224,47 @@ class TestTimeout:
         """DeepInfra took over 300s on one instance against a 180s default.
         It averages 154s, so the tail runs well past twice the mean."""
         assert llm.DEFAULT_TIMEOUT_S >= 600
+
+
+class TestTransportFailures:
+    """The third place a failure arrives, after the status line and the body.
+
+    A dropped connection or a read timeout produces no response to inspect at
+    all, and raises something that is not an HTTPError. The ladder row's log
+    showed two `openrouter 503`s against four crashes: the other two were
+    these, killing a 244-call run without retrying once.
+    """
+
+    def test_a_read_timeout_is_retried(self, no_network) -> None:
+        calls = no_network(TimeoutError("The read operation timed out"), ok_response())
+        assert llm.call(MODEL, "prompt", max_tokens=100).text == "a.py"
+        assert len(calls) == 2
+
+    def test_a_server_hangup_is_retried(self, no_network) -> None:
+        calls = no_network(http.client.IncompleteRead(b"451 bytes"), ok_response())
+        assert llm.call(MODEL, "prompt", max_tokens=100).text == "a.py"
+        assert len(calls) == 2
+
+    def test_a_refused_connection_is_retried(self, no_network) -> None:
+        calls = no_network(urllib.error.URLError("connection refused"), ok_response())
+        assert llm.call(MODEL, "prompt", max_tokens=100).text == "a.py"
+        assert len(calls) == 2
+
+    def test_it_still_gives_up_rather_than_hanging_forever(self, no_network) -> None:
+        calls = no_network(*[TimeoutError("timed out") for _ in range(llm.MAX_ATTEMPTS)])
+
+        with pytest.raises(RuntimeError, match="timed out"):
+            llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert len(calls) == llm.MAX_ATTEMPTS
+
+    def test_a_status_error_is_still_handled_as_a_status_error(self, no_network) -> None:
+        """HTTPError subclasses URLError. If the transport catch is ordered
+        first it swallows every status code, and a 400 would be retried eight
+        times instead of raising at once."""
+        calls = no_network(http_error(400, "malformed"))
+
+        with pytest.raises(RuntimeError, match="400"):
+            llm.call(MODEL, "prompt", max_tokens=100)
+
+        assert len(calls) == 1
