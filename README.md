@@ -6,7 +6,7 @@ Fault localization, built as a *measured ladder*: lexical retrieval, dense retri
 
 The system is half the deliverable. The evidence is the other half: a reproducible benchmark, a published filter rate, a contamination control, and a calibrated confidence model. That model lets the system abstain instead of guess.
 
-> **Status: M3 complete.** Rung 1 (BM25) scores **39.3% Top-1** on the dev split. Rung 2 (embeddings) scores **43.0%**. The intervals overlap, so dense retrieval matched lexical retrieval rather than beat it. The gain that did appear came from a free change to what gets indexed, not from the model. Rungs 3–4 come next.
+> **Status: M4 complete.** An LLM reranking the candidate list scores **74.2% Top-1** on the dev split, against **45.5%** for free rank fusion below it. That is the first gap in this ladder wider than its own confidence interval. Four model configurations spanning an 11.8x price difference land within 6.6 points of each other, so the model choice is not what produced it. Rung 4, the agent, comes next.
 
 ## Why localization and not patch generation
 
@@ -24,7 +24,9 @@ Dev split, 244 instances. Test set untouched until M7.
 | BM25 | AST Chunk, no bodies | 39.8% (33.8–46.0) | 52.0% | 61.3% | $0.00 | 0.68s |
 | BM25 | AST Chunk | **43.9%** (37.8–50.1) | **60.3%** | 65.7% | $0.00 | 0.91s |
 | Embedding retrieval | AST Chunk | 43.0% (37.0–49.3) | 57.9% | 67.8% | $0.00 | 0.14s + 37.6s index |
-| LLM rerank | — | — | — | — | — | — |
+| Hybrid (rung 2.5) | rank fusion | 45.5% (39.4–51.8) | 65.2% | 73.1% | $0.00 | 1.02s |
+| Cross-encoder (rung 2.6) | Evidence Chunk | 26.6% (21.5–32.5) | 42.8% | 52.6% | $0.00 | 15.05s |
+| **LLM rerank (rung 3)** | Evidence Chunk | **74.2%** (68.3–79.3) | **81.8%** | **85.3%** | **$0.0016** | 45.84s |
 | Agent | — | — | — | — | — | — |
 
 Every number traces to a dataset, split, commit, and date in [`RESULTS.md`](RESULTS.md). The run writes that file. Nobody writes it by hand. Latency is the entry's wall clock divided by 244.
@@ -70,9 +72,57 @@ M1 flagged `sphinx-doc/sphinx` at 4.5% as the sharpest test of whether embedding
 
 Its vocabulary *is* in the code. It sits in the function bodies rather than the signatures and docstrings. Bodies did most of the work. Embeddings added the rest. The prediction stays on the record. A written prediction that measurement overturned is better evidence of a working method than one that happened to be right.
 
-### What this says about M4
+### What this said about M4, and what M4 answered
 
-The next rung is an LLM reranker. It now has a specific job rather than a hopeful one. Dense retrieval did not beat lexical retrieval, but the two fail on different repositories. The useful list to rerank is therefore the union of both. M4 answers one question: can a model pick between two retrievers that are each right about different things?
+M3 argued that the useful list to rerank is the union of both retrievers, because the two fail on different repositories. M4 tested that and the argument held. Fusion of the two lists scores 45.5%, above both rungs it merges.
+
+## M4: the first established result
+
+**An LLM reranking twenty candidates scores 74.2% Top-1 (68.3–79.3).** Fusion below it scores 45.5% (39.4–51.8). The intervals do not touch. Every earlier comparison in this ladder sat inside the ±6pp noise, which is why M3 established nothing. This one does not.
+
+The deltas, each against a named row:
+
+| Against | Its Top-1 | Delta |
+|---|---|---|
+| Rung 2.6, cross-encoder | 26.6% | **+47.6pp** |
+| Rung 2.5, rank fusion | 45.5% | **+28.7pp** |
+| Rung 2, embeddings | 43.0% | **+31.2pp** |
+| Best lexical row, BM25 over AST Chunks | 43.9% | **+30.3pp** |
+
+The ladder's rule credits a rung against the rung directly below it, which is 2.6. That number is the largest and the least useful, because rung 2.6 scored *below* everything. Fusion at +28.7pp is the honest comparison.
+
+### The model is not what produced it
+
+Four configurations ran on the same candidate lists and the same prompt:
+
+| Configuration | Top-1 | Cost |
+|---|---|---|
+| `deepseek-v4-pro`, reasoning on | 79.1% (73.6–83.7) | $0.49 |
+| `deepseek-v4-pro`, reasoning off | 75.0% (69.2–80.0) | $0.31 |
+| `gpt-oss-120b`, effort high | 74.2% (68.3–79.3) | $0.39 |
+| `gpt-oss-120b`, effort low | 72.5% (66.6–77.8) | $0.76 |
+
+They span an 11.8x difference in price per token and land within 6.6 points of each other, with intervals overlapping almost entirely. **No ordering among them is established.** Both reasoning ablations point the same way. More reasoning bought 4.1pp on one model and 1.7pp on the other. Both gaps sit inside the interval.
+
+That null result is informative rather than empty. The pair was chosen to be 11.8x apart on price precisely so the measurement could show a difference if one existed. It did not.
+
+### The remaining headroom is retrieval, not ranking
+
+The candidate list holds a ground-truth file in its top 20 for **88.9%** of instances. That is the hard ceiling on any reranker, because a reranker reorders and never adds. The ladder row reaches 74.2%, which is 14.7pp below it. The best configuration reaches 79.1%, 9.8pp below.
+
+`sphinx` shows the shape of what is left. All four configurations score **63.6%** there, which is exactly its share of instances whose answer was in the list at all. Every model picks correctly on every sphinx instance it could. Its remaining loss belongs to retrieval.
+
+### What M4 overturned
+
+**Rung 2.6 was inserted to stop rung 3 taking credit for what reranking-in-general buys. It scored 26.6%, below every free rung.** A cross-encoder reading the issue and one candidate together is worse than rank fusion reading neither. The rung was added on the theory that it would absorb part of rung 3's delta. It did the opposite, and the entry stays in the ladder rather than disappearing.
+
+**This project expected the cheap model to be the weak one.** The cheapest configuration to run scored second of four. The most expensive per run scored last.
+
+### What it cost
+
+The four published rows cost **$1.95**. The account spent **$5.59**. The difference went to abandoned runs and to the search for a provider that could serve the work. One attempt completed nothing at $2.25. Another died at instance 110. The rest went on probes that established the limits. Three providers were rejected on measurement — an undocumented 8,192-token completion cap, an exhausted shared capacity pool, and repeated timeouts.
+
+The first rung with a bill also produced the first rung whose number a reader cannot regenerate from a commit alone. Reproducing it needs an API key and about two dollars.
 
 ## Design
 
@@ -90,6 +140,7 @@ Each decision carries a stated rationale and its rejected alternatives:
 | [ADR-0005](docs/adr/0005-langgraph.md) | LangGraph for the agent loop |
 | [ADR-0006](docs/adr/0006-datasets.md) | SWE-bench Verified as the anchor, a self-mined Fresh Set as the control |
 | [ADR-0007](docs/adr/0007-embedding-model.md) | A local embedding model, pinned by revision |
+| [ADR-0008](docs/adr/0008-llm-rerank.md) | Rung 3 reranks with a served open-weights model, and stops claiming determinism |
 
 ## Evaluation
 
