@@ -131,6 +131,20 @@ A system that can abstain should beat one that must guess. This project measures
 
 The `low_confidence` outcome: the system declines to answer and routes the Instance to a human.
 
+## Budget
+
+A cap on what a system may spend. Three scopes carry the name, and the word *run* alone does not say which one applies.
+
+| Scope | Name | Caps | Rung 4 |
+|---|---|---|---|
+| one Instance | **Instance Budget** | tool calls, wall clock | 8 calls, 600s |
+| one evaluation of a split | **Evaluation Budget** | dollars | $12 |
+| one milestone | **Milestone Budget** | dollars | $20 |
+
+Every scope is checked against spend already incurred, and the run stops before it breaks a cap. A run that reports an overspend afterwards is a run that already spent the money.
+
+The Instance Budget holds no dollar cap, because rung 4's cost per Instance is bounded by its structure. Eight tool calls, each with a capped result, cannot reach $0.05. A tunable cap under a structural bound could only fire on a bug, and it would hide that bug.
+
 ## Stop Condition
 
 The single terminal state every run ends in, always logged:
@@ -139,10 +153,28 @@ The single terminal state every run ends in, always logged:
 |---|---|
 | `answered` | Prediction produced above the Confidence threshold |
 | `low_confidence` | Escalated |
-| `budget_exceeded` | Cost or tool-call cap hit |
+| `budget_exceeded` | A Budget cap is reached. At rung 4 this is the tool-call cap |
 | `timeout` | Wall-clock cap hit |
 | `no_candidates` | Retrieval returned nothing |
 
+## Off-List Path
+
+A path that a model names and that the Candidate Set does not hold.
+
+Rung 3 discards one, because a reranker reorders and never adds. Rung 4 keeps one that exists, because a reach past the list is the thing rung 4 adds. One event, two dispositions. Every rung counts it.
+
+An Off-List Path is not a hallucination. The Path Guardrail answers that question, and it is a different question.
+
 ## Path Guardrail
 
-A deterministic check that every predicted path exists in the repo at the Instance's `base_commit`. A path that does not exist is a hallucination. The run rejects it, retries once, then fails. The report states the catch rate.
+A deterministic check that every predicted path exists in the repo at the Instance's `base_commit`. A path that does not exist is a hallucination. The run rejects it. The run then asks the model one more time, and it names the rejected paths. The report states the catch rate.
+
+**At rung 4 a total failure cannot happen.** The answer keeps the Candidate Set behind the model's own order, and every candidate exists at the commit. So the run stamps `answered` and it counts the event. The count is the only honest record, because a silent fall back to Candidate Set order looks healthy in every metric except the one that says whether the model answered.
+
+**The check asks about existence, not about membership.** It never asks whether the Candidate Set held the path. M4 counted 92 Off-List Paths across four configurations. Nobody split that count into paths that exist and paths that do not, so it does not size this guardrail yet.
+
+## Tool-Reached
+
+Whether a tool call surfaced a predicted path during the run that named it.
+
+The Verified Set predates the model training cutoff, so a model can name a real path from memory. Such a path passes the Path Guardrail, and it is not localization. This flag separates search from recall. The run logs it as a diagnostic. It never rejects a path.
