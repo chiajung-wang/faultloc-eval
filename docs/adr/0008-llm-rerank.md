@@ -283,3 +283,15 @@ Stated rather than quietly rebased, because a cap that resets whenever it is inc
 | ladder row, wall clock | 34 min | **20 min** |
 
 Both estimates ran high because only three instances absorbed the fixed startup cost. That startup loads the benchmark, the splits, and the retriever's encoder. The overrun on the first attempt came from the other three cells. Their estimates rested on two-instance samples, and nobody has re-measured them.
+
+## Provenance note, 2026-08-07 — the first-party DeepSeek serve is fp8
+
+The second amendment's route table lists the quantization of the `deepseek` first-party route as **unknown**. It is **fp8**.
+
+A probe for M5 returned `system_fingerprint` as `fp_9954b31ca7_prod0820_fp8_kvcache_20260402`. That table stays as written, and this note sits beside it.
+
+**This changes no decision.** The route was never pinned on precision, and the third amendment already established that precision is not the trade it appears to be.
+
+**It fills a gap in the provenance record.** Two of M4's four published rows ran on this route. Each entry names a model, a revision and a provider tag. Neither states the precision that produced the number, and nobody could state it before now. A reader who routes elsewhere gets different weights, and this note is what makes that comparison possible for these two rows.
+
+**It does not fill the other gap.** Nobody has measured whether serving precision moves *accuracy* on this task. The third amendment says so, and that still holds.
