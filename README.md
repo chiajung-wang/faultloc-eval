@@ -6,7 +6,7 @@ Fault localization, built as a *measured ladder*: lexical retrieval, dense retri
 
 The system is half the deliverable. The evidence is the other half: a reproducible benchmark, a published filter rate, a contamination control, and a calibrated confidence model. That model lets the system abstain instead of guess.
 
-> **Status: M4 complete.** An LLM reranking the candidate list scores **74.2% Top-1** on the dev split, against **45.5%** for free rank fusion below it. That is the first gap in this ladder wider than its own confidence interval. Four model configurations spanning an 11.8x price difference land within 6.6 points of each other, so the model choice is not what produced it. Rung 4, the agent, comes next.
+> **Status: M4 complete, M5 in design.** An LLM reranking the candidate list scores **75.0% Top-1** on the dev split, against **45.5%** for free rank fusion below it. That is the first gap in this ladder wider than its own confidence interval. Four model configurations spanning an 11.8x price difference land within 6.6 points of each other, so the model choice is not what produced it — the row now published is the cheapest and near-fastest of them, at $0.31 and 22 minutes for the whole split. Rung 4, the agent, is designed and not yet built: [ADR-0009](docs/adr/0009-tool-using-agent.md) declares it, and a free measurement puts its reachable ceiling at about **95.5%**.
 
 ## Why localization and not patch generation
 
@@ -26,7 +26,7 @@ Dev split, 244 instances. Test set untouched until M7.
 | Embedding retrieval | AST Chunk | 43.0% (37.0–49.3) | 57.9% | 67.8% | $0.00 | 0.14s + 37.6s index |
 | Hybrid (rung 2.5) | rank fusion | 45.5% (39.4–51.8) | 65.2% | 73.1% | $0.00 | 1.02s |
 | Cross-encoder (rung 2.6) | Evidence Chunk | 26.6% (21.5–32.5) | 42.8% | 52.6% | $0.00 | 15.05s |
-| **LLM rerank (rung 3)** | Evidence Chunk | **74.2%** (68.3–79.3) | **81.8%** | **85.3%** | **$0.0016** | 45.84s |
+| **LLM rerank (rung 3)** | Evidence Chunk | **75.0%** (69.2–80.0) | **82.8%** | **85.7%** | **$0.0013** | 5.34s |
 | Agent | — | — | — | — | — | — |
 
 Every number traces to a dataset, split, commit, and date in [`RESULTS.md`](RESULTS.md). The run writes that file. Nobody writes it by hand. Latency is the entry's wall clock divided by 244.
@@ -106,9 +106,17 @@ They span an 11.8x difference in price per token and land within 6.6 points of e
 
 That null result is informative rather than empty. The pair was chosen to be 11.8x apart on price precisely so the measurement could show a difference if one existed. It did not.
 
+### The rung-3 row moved, on cost-effectiveness
+
+The table above now names **`rerank-deepseek-off`** at 75.0%, $0.0013 per instance and 5.34s. The row this project declared in advance was `rerank` at 74.2%, and every number in this section is that row.
+
+ADR-0008 wrote the condition for the move before any number existed: if reasoning bought nothing, the ladder row goes to reasoning off, published as a correction rather than a quiet edit. It bought 4.1pp on DeepSeek, inside the ±6pp interval. The replacement is the only cell that is both cheapest to run and near-fastest — 22 minutes against 178 for its reasoning-on twin.
+
+**The 4.1pp it gives up is not the only cost.** `deepseek-off` named 43 files that were never candidates, against 14 for `deepseek-on`. A reranker discards such a path and barely notices. An agent cannot, which is why [ADR-0009](docs/adr/0009-tool-using-agent.md) pins rung 4 to reasoning **on** while this row moves to reasoning off. The two decisions point opposite ways on purpose, each made against the metric that matters for its own rung.
+
 ### The remaining headroom is retrieval, not ranking
 
-The candidate list holds a ground-truth file in its top 20 for **88.9%** of instances. That is the hard ceiling on any reranker, because a reranker reorders and never adds. The ladder row reaches 74.2%, which is 14.7pp below it. The best configuration reaches 79.1%, 9.8pp below.
+The candidate list holds a ground-truth file in its top 20 for **88.9%** of instances. That is the hard ceiling on any reranker, because a reranker reorders and never adds. The declared row reached 74.2%, which is 14.7pp below it. The row that stands now, `deepseek-off`, reaches 75.0%, 13.9pp below. The best configuration reaches 79.1%, 9.8pp below.
 
 `sphinx` shows the shape of what is left. All four configurations score **63.6%** there, which is exactly its share of instances whose answer was in the list at all. Every model picks correctly on every sphinx instance it could. Its remaining loss belongs to retrieval.
 
@@ -141,6 +149,7 @@ Each decision carries a stated rationale and its rejected alternatives:
 | [ADR-0006](docs/adr/0006-datasets.md) | SWE-bench Verified as the anchor, a self-mined Fresh Set as the control |
 | [ADR-0007](docs/adr/0007-embedding-model.md) | A local embedding model, pinned by revision |
 | [ADR-0008](docs/adr/0008-llm-rerank.md) | Rung 3 reranks with a served open-weights model, and stops claiming determinism |
+| [ADR-0009](docs/adr/0009-tool-using-agent.md) | Rung 4 starts from rung 3's payload and goes looking for what retrieval missed |
 
 ## Evaluation
 

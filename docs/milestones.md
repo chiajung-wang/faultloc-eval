@@ -10,7 +10,7 @@ This is deliberate. The predecessor project planned seven milestones in detail o
 | M2 | Instance Filter hardened + filter rate published | Drop reasons counted and reported. Unit tests cover the filter |
 | M3 | Embedding retrieval over AST Chunks (rung 2) | Rung-2 delta over rung 1 reported at cost and latency, **with the BM25-over-chunks ablation that separates the two variables** |
 | M4 | LLM rerank (rung 3) | Rung-3 delta reported. Cross-model comparison table published |
-| **M5** | **Tool-using agent (rung 4)** | Five read-only tools, stop conditions, path guardrail, budget caps |
+| **M5** | **Tool-using agent (rung 4)** | Rung-4 delta over rung 3 reported at cost and latency, with the zero-tool ablation that separates tools from scaffolding. Five read-only tools, stop conditions, path guardrail, budget caps |
 | M6 | Fresh Set mining | 150–300 post-cutoff instances, frozen, contamination gap measured |
 | M7 | Calibrator + coverage curve | ECE, reliability diagram, accuracy-vs-coverage published |
 | M8 | FastAPI service + replay gallery | `POST /localize` plus browsable stored runs |
