@@ -22,11 +22,12 @@ from faultloc.reporting import (
     code_version,
     format_duration,
     prepend_entry,
+    render_comparison,
     render_entry,
     render_terminal,
 )
 from faultloc.rungs import Prediction, StopCondition
-from faultloc.scoring import score
+from faultloc.scoring import PairedComparison, score
 
 REVISION = "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
 
@@ -182,3 +183,75 @@ class TestRenderTerminal:
     def test_warns_when_the_tree_is_dirty(self) -> None:
         terminal = render_terminal(a_report(), provenance("abc-dirty"), a_load(), 1.0)
         assert "not reproducible" in terminal
+
+
+class TestPredictionsLine:
+    def test_names_the_stored_run_when_there_is_one(self) -> None:
+        """A paired test must be traceable to the two runs that produced it."""
+        entry = render_entry(
+            a_report(),
+            provenance(),
+            a_load(),
+            12.0,
+            predictions=Path("data/predictions/bm25-dev-2026-08-03-abc1234.jsonl"),
+        )
+
+        assert "- Predictions: `data/predictions/bm25-dev-2026-08-03-abc1234.jsonl`" in entry
+
+    def test_an_entry_without_stored_predictions_is_unchanged(self) -> None:
+        """Every entry written before M5 had no such file, and the format must
+        not gain an empty bullet that reads as a missing value."""
+        entry = render_entry(a_report(), provenance(), a_load(), 12.0)
+
+        assert "Predictions" not in entry
+
+
+def a_comparison(a_only: int, b_only: int, p_value: float) -> PairedComparison:
+    return PairedComparison(
+        a="rerank-deepseek-on",
+        b="agent",
+        n=244,
+        both_hit=180,
+        both_miss=48,
+        a_only=a_only,
+        b_only=b_only,
+        p_value=p_value,
+    )
+
+
+class TestRenderComparison:
+    def test_states_the_verdict_rather_than_leave_it_to_the_reader(self) -> None:
+        """The whole reason the test exists. A reader who compares two Wilson
+        intervals would reach the opposite conclusion."""
+        rendered = render_comparison(a_comparison(0, 16, 0.00003), provenance(), provenance())
+
+        assert "difference is established" in rendered
+        assert "agent beats rerank-deepseek-on on 16" in rendered
+
+    def test_says_nothing_established_when_the_split_is_even(self) -> None:
+        rendered = render_comparison(a_comparison(7, 9, 0.8), provenance(), provenance())
+
+        assert "Nothing established" in rendered
+
+    def test_reports_a_reversal_in_the_direction_it_happened(self) -> None:
+        """A rung that loses must not be rendered as a rung that won."""
+        rendered = render_comparison(a_comparison(16, 0, 0.00003), provenance(), provenance())
+
+        assert "goes the other way" in rendered
+        assert "rerank-deepseek-on beats agent on 16" in rendered
+
+    def test_agreement_everywhere_is_untestable_and_says_so(self) -> None:
+        rendered = render_comparison(a_comparison(0, 0, 1.0), provenance(), provenance())
+
+        assert "agree on every Instance" in rendered
+
+    def test_names_the_discordant_count_as_the_evidence(self) -> None:
+        rendered = render_comparison(a_comparison(4, 20, 0.002), provenance(), provenance())
+
+        assert "discordant" in rendered
+        assert "the whole evidence" in rendered
+
+    def test_warns_that_a_wilson_interval_does_not_license_the_claim(self) -> None:
+        rendered = render_comparison(a_comparison(4, 20, 0.002), provenance(), provenance())
+
+        assert "describes that row alone" in rendered

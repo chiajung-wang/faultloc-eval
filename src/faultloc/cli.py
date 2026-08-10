@@ -26,10 +26,12 @@ from faultloc.embedding import (
 )
 from faultloc.env import load_env
 from faultloc.llm import MODELS
+from faultloc.predictions import read_run, run_path, write_run
 from faultloc.reporting import (
     Provenance,
     code_version,
     prepend_entry,
+    render_comparison,
     render_entry,
     render_terminal,
     today,
@@ -43,7 +45,7 @@ from faultloc.rungs.cross_encoder import CrossEncoderRung
 from faultloc.rungs.embed import EmbedRung
 from faultloc.rungs.hybrid import HybridRung
 from faultloc.rungs.rerank import BudgetExceededError, LlmRerankRung
-from faultloc.scoring import score, top_1_hit
+from faultloc.scoring import compare, score, top_1_hit
 
 load_env()
 
@@ -294,7 +296,21 @@ def evaluate(
         run_date=today(),
     )
 
+    # Written even when `--limit` refuses an entry. A truncated run's Predictions
+    # are still the only record of what happened, and the stored header carries
+    # the limit so nobody can mistake it for the benchmark.
+    stored = run_path(rung, split, provenance)
+    write_run(
+        stored,
+        rung=rung,
+        split=split,
+        provenance=provenance,
+        predictions=predictions,
+        limit=limit,
+    )
+
     typer.echo(render_terminal(report, provenance, loaded.report, wall_clock))
+    typer.echo(f"\n  Wrote {len(predictions)} predictions to {stored}")
 
     # Rung 3's failure modes all leave a *ranking* behind -- the one it was
     # handed -- so a run that failed everywhere scores like the rung below it
@@ -312,8 +328,60 @@ def evaluate(
         typer.echo("\n  --no-write: no results entry written.")
         return
 
-    prepend_entry(results, render_entry(report, provenance, loaded.report, wall_clock, note))
+    prepend_entry(
+        results,
+        render_entry(report, provenance, loaded.report, wall_clock, note, predictions=stored),
+    )
     typer.echo(f"\n  Wrote entry to {results}")
+
+
+@app.command(name="compare")
+def compare_runs(
+    a: Annotated[Path, typer.Option(help="Stored run for the lower rung.")],
+    b: Annotated[Path, typer.Option(help="Stored run for the upper rung.")],
+) -> None:
+    """Test whether one rung's Top-1 really beats another's, on the same Instances.
+
+    The Wilson interval on each row describes that row alone, and it treats two
+    rows as independent samples. They are not. Every rung answers the same
+    Instances, so the sampling error is shared, and two overlapping intervals do
+    not mean two rungs are indistinguishable.
+
+    Issue 01 made this the milestone's deciding instrument rather than a
+    refinement. Rung 4's whole available delta over rung 3 is about 6.6 points
+    against a ±6pp interval, so a perfect agent would still publish an
+    inconclusive row on unpaired intervals.
+    """
+    loaded = load_verified_set()
+    splits = load_splits()
+
+    left = read_run(a)
+    right = read_run(b)
+
+    if left.split != right.split:
+        raise typer.BadParameter(
+            f"{left.rung} ran on split {left.split!r} and {right.rung} on {right.split!r}"
+        )
+    truncated = [run.rung for run in (left, right) if run.is_truncated]
+    if truncated:
+        raise typer.BadParameter(
+            f"truncated runs are not comparable: {', '.join(truncated)}. "
+            "A truncated run is scored on a different instance set."
+        )
+
+    instances = splits.select(loaded.instances, left.split)
+    try:
+        result = compare(
+            left.predictions,
+            right.predictions,
+            instances,
+            a=left.rung,
+            b=right.rung,
+        )
+    except ValueError as refused:
+        raise typer.BadParameter(str(refused)) from refused
+
+    typer.echo(render_comparison(result, left.provenance, right.provenance))
 
 
 if __name__ == "__main__":
