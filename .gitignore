@@ -18,6 +18,11 @@ htmlcov/
 data/repos/
 data/index/
 data/cache/
+# Per-instance Predictions, about 7 MB per run. Ignored for the reason the
+# RUN-COMMANDS.txt note below gives: `code_version()` counts untracked files,
+# so an unignored directory that every run writes into would stamp every run
+# `-dirty` and make it unpublishable. The first run would poison the second.
+data/predictions/
 *.sqlite
 *.db
 

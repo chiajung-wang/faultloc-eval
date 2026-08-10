@@ -23,6 +23,16 @@ Both pin `deepseek/deepseek-v4-pro` on the first-party `deepseek` route, reasoni
 
 Run them one at a time. Sequential is the decision, and a run resumes from the response cache after an interruption.
 
+### The baseline must be re-run, and it costs $0.49
+
+Issue 02 found this. The paired test needs the baseline's **per-instance** Predictions, and M4 published only its aggregate.
+
+The response cache holds 244 replies for `gpt-oss-high` and **4** for `deepseek-off`. `rerank-deepseek-on` has **none**. So its Predictions cannot be replayed and the cell must run again at about **$0.49**.
+
+Do not substitute the free cached cell. `rerank` replays for $0.00, and it is `gpt-oss-high` on DeepInfra at high effort. Rung 4 pins `deepseek-on` on the first-party route. Comparing across those moves the model, the route and the reasoning setting at once, which is the confound ADR-0009's pin exists to remove.
+
+Budget: ~$7.4 main cell, ~$0.60 zero-tool cell, ~$0.49 baseline. About **$8.5**, inside the $12 Evaluation Budget and the $20 Milestone Budget.
+
 ### The two deltas
 
 **The ladder delta**, against rung 3's matched cell `rerank-deepseek-on` at 79.1% (73.6-83.7). Same model, same route, same reasoning setting, so the only thing that moves is the loop and the tools.
@@ -48,6 +58,7 @@ Update the README's results table and its narrative. Update `docs/milestones.md`
 
 ## Acceptance criteria
 
+- [ ] `rerank-deepseek-on` re-run so the baseline has per-instance Predictions (~$0.49)
 - [ ] Both cells run over the full dev split, and each emits a `RESULTS.md` entry with measured cost
 - [ ] Both entries record the model ID, the revision, the provider tag and the serving precision
 - [ ] Neither run publishes from a dirty tree
