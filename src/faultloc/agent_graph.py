@@ -129,7 +129,12 @@ class AgentLoop:
     #: CONTEXT.md promises, kept as paths rather than a count so the entry can
     #: show what a hallucinated path actually looks like.
     hallucinated: list[str] = field(default_factory=list)
-    surfaced: set[str] = field(default_factory=set)
+    #: Path -> the tool that first put it in front of the agent. A set would say
+    #: only *whether* a path was reached; the roster question is *which tool*
+    #: reached it, and ADR-0009 makes that a revisit condition.
+    surfaced: dict[str, str] = field(default_factory=dict)
+    #: Tool name -> how many times the agent called it.
+    calls_by_tool: dict[str, int] = field(default_factory=dict)
     calls_per_instance: list[int] = field(default_factory=list)
     #: What the Instance just run cost to *produce*, cached replies included.
     #: Distinct from `AgentClient.spent_usd`, which counts money leaving the
@@ -357,6 +362,7 @@ class AgentLoop:
         """One tool call, counted, with an unknown name reported to the agent."""
         self.tool_calls += 1
         name = call.get("name", "")
+        self.calls_by_tool[name] = self.calls_by_tool.get(name, 0) + 1
         tool = self.tools.get(name)
 
         if tool is None:
@@ -369,7 +375,10 @@ class AgentLoop:
 
         self.tool_rejected += result.rejected
         self.tool_truncated += result.truncated
-        self.surfaced.update(result.paths)
+        # First tool to surface a path keeps the credit. A later call that returns
+        # the same file did not find it.
+        for path in result.paths:
+            self.surfaced.setdefault(path, name)
         return result.text
 
 

@@ -195,3 +195,28 @@ class TestFailureNoteForRungFour:
         note = _failure_note(self.agent(unknown_tools=2))
 
         assert "2 calls to tools that do not exist" in note
+
+    def test_reports_calls_and_top_1_credit_per_tool(self) -> None:
+        """ADR-0002 called five tools "a deliberate ceiling", and ADR-0009 turned
+        the roster into a measurement. A tool that never surfaces a path reaching
+        an answer does not earn its slot."""
+        note = _failure_note(
+            self.agent(
+                calls_by_tool={"read_file": 12, "search_code": 5, "semantic_search": 2},
+                credited_by_tool={"read_file": 3, "search_code": 1},
+            )
+        )
+
+        assert "read_file 12 calls/3 top-1" in note
+        assert "search_code 5 calls/1 top-1" in note
+        assert "semantic_search 2 calls/0 top-1" in note
+
+    def test_orders_the_roster_by_use(self) -> None:
+        note = _failure_note(
+            self.agent(calls_by_tool={"a_rare": 1, "z_common": 9}, credited_by_tool={})
+        )
+
+        assert note.index("z_common") < note.index("a_rare")
+
+    def test_a_free_rung_gets_no_roster_line(self) -> None:
+        assert "Tools:" not in _failure_note(StubEngine(unparseable=1))

@@ -128,6 +128,13 @@ class AgentRung:
         #: arguments, none of which exist. It costs a step, so an invented name
         #: quietly shrinks the Instance Budget and has to be visible.
         self.unknown_tools = 0
+        #: Tool name -> calls, across the whole run.
+        self.calls_by_tool: dict[str, int] = {}
+        #: Tool name -> how often the path it surfaced became this Instance's Top-1.
+        #: The measure that decides whether a tool earned its slot. Top-1 rather
+        #: than "appears in the ranking", because the assembly appends every
+        #: candidate, so almost any path would qualify under the looser test.
+        self.credited_by_tool: dict[str, int] = {}
 
     @property
     def spent_usd(self) -> float:
@@ -192,6 +199,14 @@ class AgentRung:
         self.unknown_tools += loop.unknown_tools
         self.calls_per_instance.extend(loop.calls_per_instance)
         self.recalled.extend(p for p in answer.off_list if p not in loop.surfaced)
+
+        for name, count in loop.calls_by_tool.items():
+            self.calls_by_tool[name] = self.calls_by_tool.get(name, 0) + count
+
+        top_1 = answer.ranking[0] if answer.ranking else ""
+        finder = loop.surfaced.get(top_1)
+        if finder:
+            self.credited_by_tool[finder] = self.credited_by_tool.get(finder, 0) + 1
 
     def _prompt(self, instance: Instance, head: Sequence[str]) -> str:
         """The warm start.

@@ -313,3 +313,56 @@ class TestTheEvaluationBudget:
         engine.predict(instance(repo))
 
         assert engine.unknown_tools == 1
+
+    def test_credits_the_tool_that_found_the_top_1(self, repo: Fixture) -> None:
+        """The measure that decides whether a tool earned its slot."""
+        engine = rung(
+            repo,
+            Reply(
+                tool_calls=[
+                    {"name": "read_file", "args": {"path": "tests/test_core.py"}, "id": "r1"}
+                ]
+            ),
+            Reply(tool_calls=[submit("tests/test_core.py")]),
+        )
+
+        engine.predict(instance(repo))
+
+        assert engine.calls_by_tool == {"read_file": 1}
+        assert engine.credited_by_tool == {"read_file": 1}
+
+    def test_credits_no_tool_when_the_answer_came_from_the_candidate_list(
+        self, repo: Fixture
+    ) -> None:
+        """A candidate the agent simply reordered was not found by a tool, and
+        crediting one would make every tool look useful.
+
+        The tool IS called here, and on a different file. A version of this test
+        with no tool calls at all could not fail: a broken credit rule that falls
+        back to "any tool that ran" has nothing to fall back to. A break test
+        proved that, after the first version passed for the wrong reason.
+        """
+        engine = rung(
+            repo,
+            Reply(tool_calls=[{"name": "read_file", "args": {"path": "pkg/core.py"}, "id": "r1"}]),
+            Reply(tool_calls=[submit("pkg/util.py")]),
+        )
+
+        engine.predict(instance(repo))
+
+        assert engine.calls_by_tool == {"read_file": 1}
+        assert engine.credited_by_tool == {}
+
+    def test_accumulates_per_tool_counts_across_instances(self, repo: Fixture) -> None:
+        engine = rung(
+            repo,
+            Reply(tool_calls=[{"name": "read_file", "args": {"path": "pkg/core.py"}, "id": "r1"}]),
+            Reply(tool_calls=[submit("pkg/core.py")]),
+            Reply(tool_calls=[{"name": "read_file", "args": {"path": "pkg/util.py"}, "id": "r2"}]),
+            Reply(tool_calls=[submit("pkg/util.py")]),
+        )
+
+        engine.predict(instance(repo))
+        engine.predict(instance(repo))
+
+        assert engine.calls_by_tool == {"read_file": 2}

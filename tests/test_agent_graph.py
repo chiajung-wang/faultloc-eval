@@ -226,16 +226,57 @@ class TestTools:
 
         assert "contents of pkg/core.py" in transcript
 
-    def test_records_which_paths_a_tool_surfaced(self) -> None:
-        """Feeds Tool-Reached, which separates a path the agent found from one it
-        recalled. The Verified Set predates the training cutoff."""
+    def test_records_which_tool_surfaced_which_path(self) -> None:
+        """Feeds Tool-Reached AND the per-tool contribution log.
+
+        A set would say only whether a path was reached. The roster question is
+        which tool reached it, and ADR-0009 makes that a revisit condition: a tool
+        that never surfaces a path reaching an answer does not earn its slot.
+        """
         engine = loop(
             Reply(tool_calls=[call("read_file", path="pkg/util.py")]),
             Reply(tool_calls=[call(SUBMIT, paths=["pkg/util.py"])]),
         )
         engine.run("find it", CANDIDATES)
 
-        assert engine.surfaced == {"pkg/util.py"}
+        assert engine.surfaced == {"pkg/util.py": "read_file"}
+
+    def test_the_first_tool_to_surface_a_path_keeps_the_credit(self) -> None:
+        """A later call returning the same file did not find it."""
+        engine = loop(
+            Reply(tool_calls=[call("search_code", pattern="util")]),
+            Reply(tool_calls=[call("read_file", path="pkg/util.py")]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/util.py"])]),
+            tools={
+                "search_code": lambda **_: ToolResult("hit", paths=("pkg/util.py",)),
+                "read_file": read,
+            },
+        )
+        engine.run("find it", CANDIDATES)
+
+        assert engine.surfaced == {"pkg/util.py": "search_code"}
+
+    def test_counts_calls_per_tool(self) -> None:
+        engine = loop(
+            Reply(tool_calls=[call("read_file", path="a.py")]),
+            Reply(tool_calls=[call("search_code", pattern="x")]),
+            Reply(tool_calls=[call("read_file", path="b.py")]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            tools={"read_file": read, "search_code": lambda **_: ToolResult("none")},
+        )
+        engine.run("find it", CANDIDATES)
+
+        assert engine.calls_by_tool == {"read_file": 2, "search_code": 1}
+
+    def test_counts_a_tool_the_model_invented(self) -> None:
+        """It cost a step, so it belongs in the per-tool counts too."""
+        engine = loop(
+            Reply(tool_calls=[call("grep_everything", q="x")]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+        )
+        engine.run("find it", CANDIDATES)
+
+        assert engine.calls_by_tool == {"grep_everything": 1}
 
     def test_an_unknown_tool_name_is_reported_to_the_agent(self) -> None:
         """A model-caused mistake it can correct on its next call."""

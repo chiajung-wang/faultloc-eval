@@ -289,6 +289,30 @@ def _guardrail_note(engine: Rung) -> str:
     )
 
 
+def _tool_roster_note(engine: Rung) -> str:
+    """Per tool: calls made, and how often it found the file that became Top-1.
+
+    ADR-0002 called five tools "a deliberate ceiling", and ADR-0009 turned the
+    roster into a measurement rather than an assertion. A tool that never surfaces
+    a path reaching an answer does not earn its slot, and dropping it is a recorded
+    correction to ADR-0002 rather than a quiet edit.
+
+    Top-1 credit rather than "appeared in the ranking": the assembly appends every
+    candidate behind the agent's order, so almost any path would qualify under the
+    looser test and every tool would look useful.
+    """
+    calls = getattr(engine, "calls_by_tool", None)
+    if not calls:
+        return ""
+
+    credited = getattr(engine, "credited_by_tool", {}) or {}
+    parts = [
+        f"{name} {count} calls/{credited.get(name, 0)} top-1"
+        for name, count in sorted(calls.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    return f"Tools: {', '.join(parts)}."
+
+
 def _failure_note(engine: Rung) -> str:
     """What the entry has to admit about how its number was produced.
 
@@ -319,7 +343,11 @@ def _failure_note(engine: Rung) -> str:
     if reported:
         parts.append(f"Degraded: {', '.join(reported)}.")
 
-    parts.extend(part for part in (_guardrail_note(engine), _tool_call_note(engine)) if part)
+    parts.extend(
+        part
+        for part in (_guardrail_note(engine), _tool_call_note(engine), _tool_roster_note(engine))
+        if part
+    )
 
     replayed = getattr(engine, "cache_hits", 0)
     if replayed:
