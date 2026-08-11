@@ -11,6 +11,8 @@ import pytest
 from conftest import Fixture
 
 from faultloc.agent_tools import (
+    FILE_OUTLINE_SCHEMA,
+    FIND_DEFINITION_SCHEMA,
     MAX_HITS,
     MAX_RESULT_CHARS,
     MAX_RESULT_LINES,
@@ -335,6 +337,196 @@ def _commit_many_files(repo: Fixture, count: int, marker: str) -> str:
     subprocess.run(["git", "-C", str(work), "commit", "-qm", "many"], check=True)
     subprocess.run(
         ["git", "-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/many"], check=True
+    )
+    return subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+class TestFileOutline:
+    def test_lists_the_definitions_with_their_lines(self, repo: Fixture) -> None:
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+        result = box(repo, sha).file_outline("pkg/shape.py")
+
+        assert "     1  class Widget" in result.text
+        assert "     8  def helper(value)" in result.text
+        # Qualified, because `_signature` uses the qualified name. A method's class
+        # is part of what a report names, and an unqualified `build` would lose it.
+        assert "     4  def Widget.build(self, size)" in result.text
+
+    def test_reports_a_qualified_method_name(self, repo: Fixture) -> None:
+        """`_walk` qualifies a method with its class, and that rule lives in
+        chunks.py so two parsers cannot disagree about it."""
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+
+        assert "Widget.build" in box(repo, sha).file_outline("pkg/shape.py").text
+
+    def test_says_so_when_a_file_defines_nothing(self, repo: Fixture) -> None:
+        """`pkg/util.py` is a module of constants. An empty result would read as a
+        broken tool."""
+        result = box(repo).file_outline("pkg/util.py")
+
+        assert "defines no functions or classes" in result.text
+        assert not result.rejected
+
+    def test_an_absent_path_is_reported_not_raised(self, repo: Fixture) -> None:
+        assert box(repo).file_outline("pkg/invented.py").rejected
+
+    def test_surfaces_the_path_it_outlined(self, repo: Fixture) -> None:
+        assert box(repo).file_outline("pkg/core.py").paths == ("pkg/core.py",)
+
+    def test_two_outlines_are_byte_identical(self, repo: Fixture) -> None:
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+        first = box(repo, sha).file_outline("pkg/shape.py").text
+        second = box(repo, sha).file_outline("pkg/shape.py").text
+
+        assert first == second
+
+    def test_a_missing_commit_ends_the_instance(self, repo: Fixture) -> None:
+        with pytest.raises(ToolError):
+            box(repo, "0" * 40).file_outline("pkg/core.py")
+
+    def test_names_a_windowed_definition_only_once(self, repo: Fixture) -> None:
+        """`chunk_source` windows a chunk longer than the Window into several.
+
+        Retrieval wants that. Navigation does not: the same definition listed twice
+        wastes the agent's tokens and reads as two functions. A long docstring is
+        enough to split one, because an outline asks for no bodies.
+        """
+        long_doc = "x " * 1600
+        source = f'''def only(value):
+    """{long_doc}"""
+    return value
+'''
+        sha = _commit_file(repo, "pkg/wide.py", source)
+
+        result = box(repo, sha).file_outline("pkg/wide.py")
+
+        assert result.text.count("def only(value)") == 1
+        assert "1 definitions" in result.text
+
+
+class TestFindDefinition:
+    def test_finds_a_function(self, repo: Fixture) -> None:
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+        result = box(repo, sha).find_definition("build")
+
+        assert "pkg/shape.py:" in result.text
+        assert result.paths == ("pkg/shape.py",)
+
+    def test_finds_a_class(self, repo: Fixture) -> None:
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+
+        assert "class Widget" in box(repo, sha).find_definition("Widget").text
+
+    def test_accepts_a_qualified_name(self, repo: Fixture) -> None:
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+
+        assert box(repo, sha).find_definition("Widget.build").paths == ("pkg/shape.py",)
+
+    def test_a_symbol_that_is_not_defined_is_reported_not_raised(self, repo: Fixture) -> None:
+        """It may be imported or built dynamically. That is a fact about the
+        repository, not a mistake the agent made."""
+        result = box(repo).find_definition("nowhere_defined")
+
+        assert not result.rejected
+        assert "No definition of" in result.text
+
+    def test_an_empty_symbol_is_a_mistake(self, repo: Fixture) -> None:
+        assert box(repo).find_definition("  ").rejected
+
+    def test_does_not_match_a_mere_mention(self, repo: Fixture) -> None:
+        """A file that calls `build()` without defining it must not be reported.
+
+        This is the difference between `find_definition` and `search_code`, and it
+        is why the tool parses rather than trusting the grep it used to narrow.
+
+        The caller defines something ELSE on purpose. A file with no definitions at
+        all cannot catch a tool that skips the name check, because the matching
+        branch never runs -- which is exactly how a break test found this test
+        unable to fail.
+        """
+        sha = _commit_file(
+            repo,
+            "pkg/caller.py",
+            "from pkg.shape import build\n\n\ndef unrelated():\n    return build()\n",
+        )
+        result = box(repo, sha).find_definition("build")
+
+        assert "pkg/caller.py" not in result.paths
+        assert "unrelated" not in result.text
+
+    def test_skips_a_file_that_cannot_be_parsed(self, repo: Fixture) -> None:
+        """These repositories contain fixtures that are deliberately not valid
+        Python. One of them must not fail the call."""
+        sha = _commit_file(repo, "pkg/broken.py", "def build(:\n    this is not python\n")
+        result = box(repo, sha).find_definition("build")
+
+        assert "pkg/broken.py" not in result.paths
+
+    def test_two_lookups_are_byte_identical(self, repo: Fixture) -> None:
+        sha = _commit_file(repo, "pkg/shape.py", SHAPE_SOURCE)
+        assert (
+            box(repo, sha).find_definition("build").text
+            == box(repo, sha).find_definition("build").text
+        )
+
+    def test_a_missing_commit_ends_the_instance(self, repo: Fixture) -> None:
+        with pytest.raises(ToolError):
+            box(repo, "0" * 40).find_definition("build")
+
+
+class TestNavigationSchemas:
+    def test_outline_names_its_tool(self) -> None:
+        assert FILE_OUTLINE_SCHEMA["function"]["name"] == "file_outline"
+
+    def test_find_definition_names_its_tool(self) -> None:
+        assert FIND_DEFINITION_SCHEMA["function"]["name"] == "find_definition"
+
+    def test_find_definition_says_it_reaches_outside_the_candidate_list(self) -> None:
+        """The only thing rung 4 adds over rung 3, so the agent has to be told."""
+        assert (
+            "candidate list does not contain" in FIND_DEFINITION_SCHEMA["function"]["description"]
+        )
+
+    def test_both_are_json_serializable(self) -> None:
+        import json
+
+        assert json.dumps([FILE_OUTLINE_SCHEMA, FIND_DEFINITION_SCHEMA], sort_keys=True)
+
+
+SHAPE_SOURCE = '''class Widget:
+    """A widget."""
+
+    def build(self, size):
+        return size * 2
+
+
+def helper(value):
+    return value
+'''
+
+
+def _commit_file(repo: Fixture, path: str, body: str) -> str:
+    """Commit one file into the bare clone and return the new SHA."""
+    import subprocess
+    from pathlib import Path
+
+    work = Path(repo.store.root).parent / f"w_{abs(hash(path)) % 9999}"
+    subprocess.run(
+        ["git", "clone", "-q", str(repo.store.clone_path(repo.repo)), str(work)], check=True
+    )
+    for name, value in (("user.email", "t@example.com"), ("user.name", "T")):
+        subprocess.run(["git", "-C", str(work), "config", name, value], check=True)
+
+    target = work / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body)
+    subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(work), "commit", "-qm", path], check=True)
+    branch = f"b{abs(hash(path)) % 9999}"
+    subprocess.run(
+        ["git", "-C", str(work), "push", "-q", "origin", f"HEAD:refs/heads/{branch}"], check=True
     )
     return subprocess.run(
         ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True, check=True

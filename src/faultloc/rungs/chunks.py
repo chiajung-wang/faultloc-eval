@@ -66,6 +66,12 @@ class Chunk:
     #: Raw contents: the whole file for a fallback chunk, or the definition's
     #: own source when `include_bodies` is set. Empty otherwise.
     content: str = ""
+    #: 1-based line where the definition starts, and 0 for a whole-file fallback.
+    #: Retrieval never reads it. Rung 4's `file_outline` and `find_definition` do,
+    #: because an agent navigates by line number. It lives here rather than in a
+    #: second AST walk so that the qualified-name and nesting rules -- the part
+    #: that could drift between two parsers -- stay written once.
+    line: int = 0
 
     @property
     def text(self) -> str:
@@ -117,6 +123,29 @@ def chunk_source(source: str, *, include_bodies: bool = False) -> tuple[Chunk, .
         return _windowed(_whole_file(source))
 
     return tuple(window for chunk in chunks for window in _windowed(chunk))
+
+
+def definitions(source: str) -> tuple[Chunk, ...]:
+    """Named definitions in one file, in source order, and NOT windowed.
+
+    Retrieval wants windows: a chunk longer than the Window is split so nothing is
+    truncated. Navigation wants definitions. Rung 4's `file_outline` and
+    `find_definition` read this, because a window carries no signature and no line
+    -- `_windowed` drops both on purpose, since repeating them would index them
+    once per window -- and it renames the pieces to `name#0` and `name#1`.
+
+    Empty for a file that parses to nothing, and for one that does not parse at
+    all. Those have no definition to point at, and `chunk_source`'s whole-file
+    fallback exists to keep such a file *retrievable*, which is a different job.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return ()
+
+    return tuple(_walk(tree.body, prefix="", lines=[]))
 
 
 def _windowed(chunk: Chunk, budget: int = WINDOW_CHARS) -> tuple[Chunk, ...]:
@@ -214,6 +243,7 @@ def _walk(body: list[ast.stmt], *, prefix: str, lines: list[str]) -> Iterable[Ch
             signature=_signature(node, name),
             docstring=ast.get_docstring(node) or "",
             content=_own_source(node, lines) if lines else "",
+            line=node.lineno,
         )
         yield from _walk(node.body, prefix=f"{name}.", lines=lines)
 

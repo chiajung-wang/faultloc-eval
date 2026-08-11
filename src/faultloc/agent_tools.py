@@ -33,6 +33,7 @@ from dataclasses import dataclass
 
 from faultloc.dataset.models import Instance
 from faultloc.repos import RepoStore
+from faultloc.rungs.chunks import definitions
 
 #: Characters a single tool result may carry. About 1,000 tokens at four
 #: characters each, which is the per-result figure ADR-0009's cost arithmetic
@@ -77,6 +78,18 @@ class ToolResult:
     #: The agent made a mistake it can correct on its next call. Counted, and not
     #: absorbed, because a rung whose tools all fail still produces a ranking.
     rejected: bool = False
+
+
+def _fit(rendered: list[str]) -> tuple[str, bool]:
+    """Join lines within both caps, and say whether anything was cut."""
+    kept: list[str] = []
+    used = 0
+    for line in rendered[:MAX_RESULT_LINES]:
+        if used + len(line) + 1 > MAX_RESULT_CHARS:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    return "\n".join(kept), len(kept) < len(rendered)
 
 
 def _clip(lines: list[str], first: int) -> tuple[str, bool]:
@@ -185,6 +198,112 @@ class Toolbox:
             truncated=len(hits) > len(shown),
         )
 
+    def file_outline(self, path: str) -> ToolResult:
+        """The definitions in `path`, with their lines and without their bodies.
+
+        The cheapest tool in tokens, and the natural follow-up to a search hit:
+        find a file, outline it, then read only the range that matters.
+        """
+        found = self._require(path)
+        if isinstance(found, ToolResult):
+            return found
+
+        definitions = self._definitions(found)
+        if not definitions:
+            return ToolResult(f"`{found}` defines no functions or classes.", paths=(found,))
+
+        rendered = [f"{chunk.line:>6}  {chunk.signature}" for chunk in definitions]
+        body, truncated = _fit(rendered)
+        header = f"{found}: {len(definitions)} definitions"
+        if truncated:
+            header += " (cut to fit)"
+        return ToolResult(f"{header}\n{body}", paths=(found,), truncated=truncated)
+
+    def find_definition(self, symbol: str) -> ToolResult:
+        """Where `symbol` is defined, across the repository at the pinned commit.
+
+        The tool most likely to reach a file the Candidate Set never held, because
+        it follows structure rather than similarity -- and reaching past the list
+        is the only thing rung 4 adds over rung 3.
+
+        `git grep` narrows the search before any parsing. Parsing every source
+        file would be thousands of `ast.parse` calls per call on django, and the
+        name has to appear literally in a file that defines it.
+        """
+        wanted = (symbol or "").strip()
+        if not wanted:
+            return ToolResult("Give a function or class name.", rejected=True)
+
+        # Narrow on the LAST segment. A qualified name never appears literally in
+        # the file that defines it: the source says `class Widget` and then `def
+        # build`, so a grep for `Widget.build` finds nothing at the definition
+        # site. The bare name does appear, and the parse below is what confirms it
+        # is a definition rather than a mention.
+        bare = wanted.rpartition(".")[2]
+        try:
+            candidates = self.store.grep(*self._pin, bare)
+        except Exception as broken:
+            raise ToolError(f"cannot search {self.instance.repo} at {self._pin[1]}") from broken
+
+        hits: list[tuple[str, int, str]] = []
+        for candidate in candidates:
+            for chunk in self._definitions(candidate):
+                if chunk.name == wanted or chunk.name.endswith(f".{wanted}"):
+                    hits.append((candidate, chunk.line, chunk.signature))
+
+        if not hits:
+            return ToolResult(
+                f"No definition of `{wanted}` found at this commit. "
+                "It may be imported from elsewhere, or defined dynamically."
+            )
+
+        body, truncated = _fit([f"  {p}:{line}  {sig}" for p, line, sig in hits[:MAX_HITS]])
+        header = f"{len(hits)} definitions of `{wanted}`"
+        if len(hits) > MAX_HITS:
+            header += f", showing the first {MAX_HITS}"
+        return ToolResult(
+            f"{header}:\n{body}",
+            paths=tuple(dict.fromkeys(p for p, _, _ in hits[:MAX_HITS])),
+            truncated=truncated or len(hits) > MAX_HITS,
+        )
+
+    def _definitions(self, path: str) -> tuple:
+        """Named definitions in one file, in source order.
+
+        `chunks.definitions` walks the tree and does not window. A window carries
+        no signature and no line, and it renames the pieces to `name#0` and
+        `name#1`, so an outline built on windows lists a long definition as
+        nameless rubbish. A test with a 3,200-character docstring found exactly
+        that.
+
+        The qualified-name and nesting rules stay in `chunks.py`, written once, so
+        two parsers cannot drift apart about what a definition is.
+        """
+        return definitions(self.store.read_file(*self._pin, path))
+
+    def _require(self, path: str) -> str | ToolResult:
+        """The cleaned path, or the result to send back instead.
+
+        Existence is checked against `list_files`, which is the only way to tell a
+        path the agent invented from a broken checkout: `RepoStore` raises the
+        same exception for both.
+        """
+        if not path or not isinstance(path, str):
+            return ToolResult("Give a repository-relative file path.", rejected=True)
+
+        cleaned = path.strip().lstrip("./")
+        try:
+            present = {entry.path for entry in self.store.list_files(*self._pin)}
+        except Exception as broken:
+            raise ToolError(f"cannot list {self.instance.repo} at {self._pin[1]}") from broken
+
+        if cleaned not in present:
+            return ToolResult(
+                f"No file at `{cleaned}` in {self.instance.repo} at this commit.",
+                rejected=True,
+            )
+        return cleaned
+
     @property
     def _pin(self) -> tuple[str, str]:
         return (self.instance.repo, self.instance.base_commit)
@@ -211,6 +330,46 @@ SEARCH_CODE_SCHEMA = {
                 }
             },
             "required": ["pattern"],
+        },
+    },
+}
+
+FILE_OUTLINE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "file_outline",
+        "description": (
+            "List the functions and classes a file defines, with their line numbers "
+            "and without their bodies. Cheapest way to see a file's shape. "
+            "Use it after a search hit, then read only the range that matters."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Repository-relative path."}},
+            "required": ["path"],
+        },
+    },
+}
+
+FIND_DEFINITION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "find_definition",
+        "description": (
+            "Find where a function or class is defined, anywhere in the repository. "
+            "Give a bare name such as get_queryset, or a qualified one such as "
+            "QuerySet.filter. Use it to follow a call or an import to the file that "
+            "owns it, which is often a file the candidate list does not contain."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Function or class name, for example get_queryset",
+                }
+            },
+            "required": ["symbol"],
         },
     },
 }
