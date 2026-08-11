@@ -18,6 +18,7 @@ from faultloc.agent_tools import (
     MAX_RESULT_LINES,
     READ_FILE_SCHEMA,
     SEARCH_CODE_SCHEMA,
+    SEMANTIC_SEARCH_SCHEMA,
     Toolbox,
     ToolError,
 )
@@ -531,3 +532,82 @@ def _commit_file(repo: Fixture, path: str, body: str) -> str:
     return subprocess.run(
         ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+class TestSemanticSearch:
+    def dense(self, *paths: str):
+        """Stands in for rung 2's index, so no torch and no 1.5 GB of vectors."""
+        seen: list[tuple[str, int]] = []
+
+        def search(_instance, query: str, limit: int) -> tuple[str, ...]:
+            seen.append((query, limit))
+            return paths[:limit]
+
+        search.seen = seen  # type: ignore[attr-defined]
+        return search
+
+    def test_returns_the_closest_files_best_first(self, repo: Fixture) -> None:
+        found = self.dense("pkg/core.py", "pkg/util.py")
+        box_ = Toolbox(repo.store, box(repo).instance, dense=found)
+
+        result = box_.semantic_search("widget rendering is wrong")
+
+        assert result.paths == ("pkg/core.py", "pkg/util.py")
+        assert "best first" in result.text
+
+    def test_passes_the_agents_own_query_through(self, repo: Fixture) -> None:
+        """The new power is the query. The Candidate Set was built from the raw
+        issue report, so repeating it would return the list the agent already has.
+        """
+        found = self.dense("pkg/core.py")
+        Toolbox(repo.store, box(repo).instance, dense=found).semantic_search("rewritten")
+
+        assert found.seen[0][0] == "rewritten"
+
+    def test_asks_for_no_more_than_the_hit_cap(self, repo: Fixture) -> None:
+        found = self.dense("pkg/core.py")
+        Toolbox(repo.store, box(repo).instance, dense=found).semantic_search("q")
+
+        assert found.seen[0][1] == MAX_HITS
+
+    def test_an_empty_query_is_a_mistake(self, repo: Fixture) -> None:
+        found = self.dense("pkg/core.py")
+
+        assert Toolbox(repo.store, box(repo).instance, dense=found).semantic_search(" ").rejected
+
+    def test_matching_nothing_is_a_fact_and_not_a_mistake(self, repo: Fixture) -> None:
+        box_ = Toolbox(repo.store, box(repo).instance, dense=self.dense())
+
+        result = box_.semantic_search("nothing like this")
+
+        assert not result.rejected
+        assert "Nothing in the index matched" in result.text
+
+    def test_says_so_when_dense_retrieval_is_unavailable(self, repo: Fixture) -> None:
+        """Absent when the `embed` extra is missing. It must point the agent at a
+        tool that does work rather than fail the step for a reason the agent
+        cannot act on."""
+        result = box(repo).semantic_search("anything")
+
+        assert "unavailable" in result.text
+        assert "search_code" in result.text
+        assert not result.rejected
+
+    def test_two_searches_are_byte_identical(self, repo: Fixture) -> None:
+        box_ = Toolbox(repo.store, box(repo).instance, dense=self.dense("pkg/core.py"))
+
+        assert box_.semantic_search("q").text == box_.semantic_search("q").text
+
+
+class TestSemanticSearchSchema:
+    def test_names_the_tool(self) -> None:
+        assert SEMANTIC_SEARCH_SCHEMA["function"]["name"] == "semantic_search"
+
+    def test_tells_the_agent_to_write_its_own_query(self) -> None:
+        """Otherwise it repeats the bug report and gets the candidate list back."""
+        assert "Write your own query" in SEMANTIC_SEARCH_SCHEMA["function"]["description"]
+
+    def test_says_when_to_prefer_it_over_search_code(self) -> None:
+        """Issue 01: error strings reach nothing literally, and sphinx describes
+        rendered output. This is the tool for that case."""
+        assert "rendered output" in SEMANTIC_SEARCH_SCHEMA["function"]["description"]

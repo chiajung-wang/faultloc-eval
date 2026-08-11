@@ -29,6 +29,7 @@ processes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from faultloc.dataset.models import Instance
@@ -125,6 +126,10 @@ class Toolbox:
 
     store: RepoStore
     instance: Instance
+    #: Dense retrieval, injected because it needs rung 2's index and encoder and
+    #: this module imports neither. Absent in a test, and absent when the `embed`
+    #: extra is missing, and `semantic_search` says so rather than failing.
+    dense: Callable[[Instance, str, int], tuple[str, ...]] | None = None
 
     def read_file(self, path: str, start: int = 1, end: int = MAX_RESULT_LINES) -> ToolResult:
         """Lines `start` to `end` of `path`, at the Instance's `base_commit`."""
@@ -267,6 +272,38 @@ class Toolbox:
             truncated=truncated or len(hits) > MAX_HITS,
         )
 
+    def semantic_search(self, query: str) -> ToolResult:
+        """Files whose indexed code is closest in meaning to `query`.
+
+        The new power here is the *query*. The Candidate Set was built from the raw
+        issue report, so re-running the same retriever on the same text would add
+        nothing. An agent that rewrites the query is asking a different question.
+
+        Named in advance as the tool that could help `sphinx`, whose reports
+        describe rendered output in words the code does not contain. `git grep`
+        should fail there by construction, and issue 01 measured sphinx reachable
+        in only 50% of its 8 missed Instances.
+        """
+        cleaned = (query or "").strip()
+        if not cleaned:
+            return ToolResult("Give something to search for.", rejected=True)
+
+        if self.dense is None:
+            return ToolResult(
+                "Semantic search is unavailable in this run. Use search_code instead."
+            )
+
+        hits = self.dense(self.instance, cleaned, MAX_HITS)
+        if not hits:
+            return ToolResult(f"Nothing in the index matched `{cleaned}`.")
+
+        body, truncated = _fit([f"  {path}" for path in hits])
+        return ToolResult(
+            f"{len(hits)} files closest to `{cleaned}`, best first:\n{body}",
+            paths=hits,
+            truncated=truncated,
+        )
+
     def _definitions(self, path: str) -> tuple:
         """Named definitions in one file, in source order.
 
@@ -370,6 +407,30 @@ FIND_DEFINITION_SCHEMA = {
                 }
             },
             "required": ["symbol"],
+        },
+    },
+}
+
+SEMANTIC_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "semantic_search",
+        "description": (
+            "Find source files whose code is closest in meaning to a description. "
+            "Unlike search_code this does not need an exact string, so use it when "
+            "the report describes behaviour or rendered output rather than naming "
+            "an identifier. Write your own query: repeating the bug report verbatim "
+            "returns the candidate list you already have."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What the code you want would be doing.",
+                }
+            },
+            "required": ["query"],
         },
     },
 }
