@@ -221,9 +221,9 @@ def _run(engine: Rung, instances: Sequence[Instance]) -> list[Prediction]:
                     getattr(engine, "budget_usd", 0.0),
                     time.perf_counter() - started,
                     (
-                        getattr(engine, "unparseable", 0),
-                        getattr(engine, "truncated", 0),
-                        getattr(engine, "off_list", 0),
+                        _count(engine, "unparseable"),
+                        _count(engine, "truncated"),
+                        _count(engine, "off_list"),
                     ),
                 ),
                 nl=True,
@@ -232,27 +232,93 @@ def _run(engine: Rung, instances: Sequence[Instance]) -> list[Prediction]:
     return predictions
 
 
+def _count(engine: Rung, attribute: str) -> int:
+    """How many, whether the rung counts with an integer or keeps a list.
+
+    Rung 3 counts `off_list` as an integer. Rung 4 keeps the paths themselves, so
+    the entry can show what a hallucinated path looks like rather than only how
+    many there were. Without this, rung 4's note would print a Python list into
+    the results log.
+    """
+    value = getattr(engine, attribute, 0)
+    return len(value) if isinstance(value, list | set | tuple) else int(value)
+
+
+def _tool_call_note(engine: Rung) -> str:
+    """The tool-call distribution, which is ADR-0009's stated revisit condition.
+
+    If most Instances reach the cap, the cap produced the number rather than the
+    agent, and the cap has to rise. A cap of 8 cannot answer how many steps the
+    agent actually wants, which was the one virtue of the PRD's original 25.
+    """
+    calls = getattr(engine, "calls_per_instance", None)
+    if not calls:
+        return ""
+
+    cap = getattr(engine, "max_tool_calls", 0)
+    ordered = sorted(calls)
+    median = ordered[len(ordered) // 2]
+    at_cap = sum(1 for n in calls if cap and n >= cap)
+    return (
+        f"Tool calls: median {median}, mean {sum(calls) / len(calls):.1f}, "
+        f"cap of {cap} reached on {at_cap}/{len(calls)} instances."
+    )
+
+
+def _guardrail_note(engine: Rung) -> str:
+    """The Path Guardrail's catch rate, which `CONTEXT.md` promises to publish.
+
+    Reported apart from the degrade counts because an Off-List Path is not a
+    failure. It is what rung 4 adds over rung 3, and issue 01 measured that 5 of
+    6 such paths from a cached rung-3 cell existed. `Tool-Reached` splits the
+    accepted ones: a real path that no tool ever surfaced was recalled from
+    training data rather than found, and the Verified Set predates the cutoff.
+    """
+    if not hasattr(engine, "hallucinated"):
+        return ""
+
+    absent = _count(engine, "hallucinated")
+    retries = _count(engine, "guardrail_retries")
+    accepted = _count(engine, "off_list")
+    recalled = _count(engine, "recalled")
+
+    return (
+        f"Guardrail: {absent} paths rejected as absent at base_commit, "
+        f"{retries} retries. Off-list accepted: {accepted}, of which "
+        f"{recalled} were never surfaced by a tool."
+    )
+
+
 def _failure_note(engine: Rung) -> str:
     """What the entry has to admit about how its number was produced.
 
-    Two different things, deliberately worded apart. *Degraded* counts the ways
-    a rung silently kept its input ranking -- each one a route to looking like a
-    null result while having failed. *Replayed* is not a failure at all: it says
-    how much of the run came from cache rather than from fresh calls, which a
-    reader needs in order to read the cost column correctly.
+    Several different things, deliberately worded apart. *Degraded* counts the
+    ways a rung silently kept its input ranking -- each one a route to looking
+    like a null result while having failed. *Replayed* is not a failure at all: it
+    says how much of the run came from cache rather than from fresh calls, which a
+    reader needs in order to read the cost column correctly. The guardrail and
+    tool-call lines belong to rung 4 and are absent for every rung below it.
     """
-    degraded = [
-        (label, getattr(engine, attribute, 0))
-        for attribute, label in (
-            ("unparseable", "unparseable replies"),
-            ("truncated", "truncated replies"),
-            ("off_list", "off-list paths"),
-        )
-    ]
+    # An Off-List Path is a degrade at rung 3 and the *product* at rung 4. Rung 3
+    # discards one, because a reranker reorders and never adds. Rung 4 keeps one
+    # that exists, and reports it under the guardrail instead. Filing it as a
+    # degrade here would be the exact conflation ADR-0009 corrects.
+    reaches_past_the_list = hasattr(engine, "hallucinated")
+    tracked = (
+        ("unparseable", "unparseable replies"),
+        ("truncated", "truncated replies"),
+        ("no_candidates", "instances with no candidates"),
+    )
+    if not reaches_past_the_list:
+        tracked += (("off_list", "off-list paths"),)
+
+    degraded = [(label, _count(engine, attribute)) for attribute, label in tracked]
     parts = []
     reported = [f"{count} {label}" for label, count in degraded if count]
     if reported:
         parts.append(f"Degraded: {', '.join(reported)}.")
+
+    parts.extend(part for part in (_guardrail_note(engine), _tool_call_note(engine)) if part)
 
     replayed = getattr(engine, "cache_hits", 0)
     if replayed:
