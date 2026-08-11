@@ -127,10 +127,16 @@ class AgentLoop:
     hallucinated: list[str] = field(default_factory=list)
     surfaced: set[str] = field(default_factory=set)
     calls_per_instance: list[int] = field(default_factory=list)
+    #: What the Instance just run cost to *produce*, cached replies included.
+    #: Distinct from `AgentClient.spent_usd`, which counts money leaving the
+    #: account now and is cumulative across the whole run. A Prediction states
+    #: what a reader would pay to reproduce it, so a replayed step still counts.
+    run_cost_usd: float = 0.0
 
     def run(self, prompt: str, candidates: Sequence[str]) -> AgentState:
         """One Instance, from the warm-start prompt to a Stop Condition."""
         graph = self._build()
+        self.run_cost_usd = 0.0
         state: AgentState = {
             "messages": [HumanMessage(content=prompt)],
             "candidates": tuple(candidates),
@@ -201,6 +207,7 @@ class AgentLoop:
             return {"stop": StopCondition.TIMEOUT}
 
         reply = self.client.invoke(state["messages"])
+        self.run_cost_usd += reply.cost_usd
         return {"messages": [AIMessage(content=reply.text, tool_calls=list(reply.tool_calls))]}
 
     def _route(self, state: AgentState) -> str:

@@ -56,6 +56,26 @@ app = typer.Typer(
 )
 
 
+def _agent(max_tool_calls: int | None = None) -> Rung:
+    """Rung 4, with the framework imported here and not at module scope.
+
+    `cli.py` imports every rung at module level, and `agent_graph.py` imports
+    LangGraph at module level. A top-level import chain would therefore break
+    `faultloc --help` for anyone who installed without the extra. `embedding.py`
+    and `reranking.py` raise from inside their loaders for the same reason.
+    """
+    try:
+        from faultloc.agent_client import AgentCache
+        from faultloc.rungs.agent import AgentRung
+    except ImportError as missing:
+        raise typer.BadParameter(
+            "agent support is an optional extra; install it with `uv sync --extra agent`"
+        ) from missing
+
+    caps = {} if max_tool_calls is None else {"max_tool_calls": max_tool_calls}
+    return AgentRung(cache=AgentCache(), **caps)
+
+
 def _rerank(model: str) -> LlmRerankRung:
     """A rung-3 cell with its response cache attached.
 
@@ -81,6 +101,10 @@ RUNGS: dict[str, Callable[[], Rung]] = {
     "rerank-gpt-oss-low": partial(_rerank, "gpt-oss-low"),
     "rerank-deepseek-off": partial(_rerank, "deepseek-off"),
     "rerank-deepseek-on": partial(_rerank, "deepseek-on"),
+    # ADR-0009 declared both rung-4 cells before either ran, so both exist here
+    # from the start rather than one appearing once the other has a number.
+    "agent": _agent,
+    "agent-no-tools": partial(_agent, max_tool_calls=0),
 }
 DEFAULT_RESULTS = Path("RESULTS.md")
 
@@ -242,7 +266,10 @@ def evaluate(
     rung: Annotated[
         str,
         typer.Option(
-            help="Which rung: bm25 | bm25-chunks | bm25-chunks-bodies | embed | rerank | agent"
+            help=(
+                "Which rung: bm25 | bm25-chunks | bm25-chunks-bodies | embed | "
+                "hybrid | cross-encoder | rerank | agent | agent-no-tools"
+            )
         ),
     ] = "bm25",
     split: Annotated[str, typer.Option(help="Dataset split: dev | test")] = "dev",
