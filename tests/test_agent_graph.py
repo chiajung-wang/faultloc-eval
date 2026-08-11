@@ -299,3 +299,113 @@ class TestSubmittedPaths:
         engine = loop(Reply(tool_calls=[call(SUBMIT, paths=[])]))
 
         assert submitted_paths(engine.run("find it", CANDIDATES)) == ()
+
+
+class FakeRail:
+    """A guardrail whose idea of existence is a fixed set."""
+
+    def __init__(self, *present: str) -> None:
+        self.present = set(present)
+
+    def split(self, paths):
+        kept = tuple(p for p in paths if p in self.present)
+        absent = tuple(p for p in paths if p not in self.present)
+        return kept, absent
+
+
+class TestTheGuardrailInsideTheLoop:
+    def test_a_valid_submission_passes_straight_through(self) -> None:
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            guardrail=FakeRail("pkg/core.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert state["ranking"] == ("pkg/core.py",)
+        assert engine.guardrail_retries == 0
+
+    def test_an_absent_path_buys_one_retry_that_names_it(self) -> None:
+        """Rejecting a path is only useful if the agent can then name another,
+        which is why the guardrail runs inside the loop rather than after it."""
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            guardrail=FakeRail("pkg/core.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+        transcript = " ".join(str(m.content) for m in state["messages"])
+
+        assert engine.guardrail_retries == 1
+        assert "ghost.py" in transcript
+        assert state["ranking"] == ("pkg/core.py",)
+        assert engine.hallucinated == ["ghost.py"]
+
+    def test_the_retry_is_offered_exactly_once(self) -> None:
+        """An agent that keeps naming files that do not exist would loop forever."""
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+            Reply(tool_calls=[call(SUBMIT, paths=["phantom.py"])]),
+            guardrail=FakeRail("pkg/core.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert engine.guardrail_retries == 1
+        assert state["ranking"] == ()
+        assert engine.hallucinated == ["ghost.py", "phantom.py"]
+
+    def test_a_partly_valid_submission_keeps_the_survivors_and_still_retries(self) -> None:
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py", "ghost.py"])]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py", "pkg/util.py"])]),
+            guardrail=FakeRail("pkg/core.py", "pkg/util.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert engine.guardrail_retries == 1
+        assert state["ranking"] == ("pkg/core.py", "pkg/util.py")
+
+    def test_an_off_list_path_that_exists_survives_the_guardrail(self) -> None:
+        """The only route above the Candidate Set's 88.9% ceiling."""
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["src/found.py"])]),
+            guardrail=FakeRail("src/found.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert state["ranking"] == ("src/found.py",)
+        assert engine.hallucinated == []
+
+    def test_the_guardrail_never_fails_the_instance(self) -> None:
+        """Every path rejected, and the run still ends `answered`.
+
+        The assembly puts the Candidate Set behind the agent's order and every
+        candidate exists by construction, so there is nothing for a terminal
+        guardrail state to fire on. ADR-0009 keeps the enum at five.
+        """
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+            Reply(tool_calls=[call(SUBMIT, paths=["phantom.py"])]),
+            guardrail=FakeRail("pkg/core.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert stop_condition(state) == StopCondition.ANSWERED
+
+    def test_a_retry_does_not_spend_a_tool_call(self) -> None:
+        """The guardrail's retry is not a search. Charging it would take a step
+        away from the Instance Budget for a mistake the agent is fixing."""
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            guardrail=FakeRail("pkg/core.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert state["tool_calls_used"] == 0

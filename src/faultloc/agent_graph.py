@@ -1,4 +1,4 @@
-"""Rung 4's loop: three nodes, four edges, and five ways to stop.
+"""Rung 4's loop: six nodes and five ways to stop.
 
 [ADR-0005](../../docs/adr/0005-langgraph.md) chose LangGraph because rung 4 is
 already a state machine, and its Consequences name the debt that choice carries:
@@ -27,9 +27,16 @@ when a reply arrives with neither an answer nor a tool call, the loop appends on
 message telling the agent to answer now. If the next reply still does not answer,
 the run stops. Without that single flag the loop could ask forever.
 
-The guardrail and the answer assembly are not here. This module ends a run with
-whatever paths the agent submitted, unchecked. Issue 05's guardrail decides which
-of them survive.
+**A submission goes to `check`, not straight out.** The Path Guardrail runs inside
+the loop, because rejecting a path is only useful if the agent can then name a
+different one. It gets one retry, for the same reason the last chance does.
+
+The three nodes above the loop are `begin`, which refuses an Instance with nothing
+to rank, `nudge`, and `finish`. Each exists because a conditional edge decides and
+cannot write: every outcome that has to record something needs a node of its own.
+
+`agent_answer.py` holds the guardrail itself and the assembly. This module decides
+*when* they run.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from faultloc.agent_answer import REJECTED_PATHS, Guardrail
 from faultloc.agent_client import AgentClient
 from faultloc.agent_tools import ToolResult
 from faultloc.rungs import StopCondition
@@ -78,6 +86,12 @@ class AgentState(TypedDict):
     stop: str
     ranking: tuple[str, ...]
     deadline: float
+    #: The guardrail gets to reject once and ask again. Without the flag an agent
+    #: that keeps naming files that do not exist would loop forever.
+    guardrail_retried: bool
+    #: Set by `check` for one hop, so the edge out of it can route without
+    #: reading `stop`. `stop` names a Stop Condition, and a retry is not one.
+    retry_now: bool
 
 
 @dataclass
@@ -92,6 +106,7 @@ class AgentLoop:
 
     client: AgentClient
     tools: dict[str, Any]
+    guardrail: Guardrail | None = None
     max_tool_calls: int = MAX_TOOL_CALLS
     timeout_s: float = TIMEOUT_S
 
@@ -104,6 +119,12 @@ class AgentLoop:
     #: Had its last chance and submitted nothing. Falls back to the Candidate Set
     #: order, which scores like the rung below, so it must never be silent.
     no_answer: int = 0
+    #: Times the guardrail rejected a submission and asked again.
+    guardrail_retries: int = 0
+    #: Every path named that does not exist at `base_commit`. The catch rate
+    #: CONTEXT.md promises, kept as paths rather than a count so the entry can
+    #: show what a hallucinated path actually looks like.
+    hallucinated: list[str] = field(default_factory=list)
     surfaced: set[str] = field(default_factory=set)
     calls_per_instance: list[int] = field(default_factory=list)
 
@@ -118,6 +139,8 @@ class AgentLoop:
             "stop": "",
             "ranking": (),
             "deadline": time.monotonic() + self.timeout_s,
+            "guardrail_retried": False,
+            "retry_now": False,
         }
         # `recursion_limit` is the framework's own guard, and it is not the
         # budget. Two graph steps per tool call, plus the nudge and the final
@@ -134,6 +157,7 @@ class AgentLoop:
         graph.add_node("act", self._act)
         graph.add_node("nudge", self._nudge)
         graph.add_node("finish", self._finish)
+        graph.add_node("check", self._check)
 
         graph.add_edge(START, "begin")
         graph.add_conditional_edges(
@@ -142,7 +166,12 @@ class AgentLoop:
         graph.add_conditional_edges(
             "think",
             self._route,
-            {END: END, "act": "act", "nudge": "nudge", "finish": "finish"},
+            {"check": "check", "act": "act", "nudge": "nudge", "finish": "finish", END: END},
+        )
+        graph.add_conditional_edges(
+            "check",
+            lambda s: "think" if s["retry_now"] else END,
+            {"think": "think", END: END},
         )
         graph.add_edge("act", "think")
         graph.add_edge("nudge", "think")
@@ -192,7 +221,7 @@ class AgentLoop:
         calls = list(getattr(state["messages"][-1], "tool_calls", ()) or ())
 
         if any(c.get("name") == SUBMIT for c in calls):
-            return END
+            return "check"
 
         searches = [c for c in calls if c.get("name") != SUBMIT]
         if searches and state["tool_calls_used"] < self.max_tool_calls:
@@ -211,6 +240,42 @@ class AgentLoop:
             "messages": [HumanMessage(content=FINISH_NOW.format(submit=SUBMIT))],
             "nudged": True,
         }
+
+    def _check(self, state: AgentState) -> dict:
+        """The Path Guardrail. Existence only, and never membership.
+
+        A path the Candidate Set does not hold is kept if it exists, because
+        reaching past the list is the only thing rung 4 adds over rung 3. Issue 01
+        measured the stakes: of 6 Off-List Paths recovered from a cached rung-3
+        cell, 5 existed. Rejecting them as hallucinations would have discarded
+        five real files.
+
+        An absent path buys one retry, quoted back so the agent knows which ones.
+        After that the survivors stand, and the run keeps going with whatever is
+        left. It cannot fail the Instance, because the assembly puts the Candidate
+        Set behind the agent's order and every candidate exists by construction.
+        """
+        submitted = submitted_paths(state)
+
+        if self.guardrail is None:
+            return {"ranking": submitted, "retry_now": False}
+
+        kept, absent = self.guardrail.split(submitted)
+        self.hallucinated.extend(absent)
+
+        if absent and not state["guardrail_retried"]:
+            self.guardrail_retries += 1
+            return {
+                "messages": [
+                    HumanMessage(
+                        content=REJECTED_PATHS.format(paths=", ".join(absent), submit=SUBMIT)
+                    )
+                ],
+                "guardrail_retried": True,
+                "retry_now": True,
+            }
+
+        return {"ranking": kept, "retry_now": False}
 
     def _finish(self, state: AgentState) -> dict:
         """The agent had its last chance and still did not answer.
