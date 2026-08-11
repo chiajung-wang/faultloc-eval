@@ -308,6 +308,7 @@ def _failure_note(engine: Rung) -> str:
         ("unparseable", "unparseable replies"),
         ("truncated", "truncated replies"),
         ("no_candidates", "instances with no candidates"),
+        ("unknown_tools", "calls to tools that do not exist"),
     )
     if not reaches_past_the_list:
         tracked += (("off_list", "off-list paths"),)

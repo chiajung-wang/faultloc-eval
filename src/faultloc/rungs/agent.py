@@ -123,6 +123,11 @@ class AgentRung:
         self.calls_per_instance: list[int] = []
         self.guardrail_retries = 0
         self.unparseable = 0
+        #: Tool names the model invented. Measured on the very first real call:
+        #: the agent asked for `search_content` with `directory` and `fileTypes`
+        #: arguments, none of which exist. It costs a step, so an invented name
+        #: quietly shrinks the Instance Budget and has to be visible.
+        self.unknown_tools = 0
 
     @property
     def spent_usd(self) -> float:
@@ -184,6 +189,7 @@ class AgentRung:
         self.fell_back += answer.fell_back
         self.unparseable += answer.fell_back
         self.guardrail_retries += loop.guardrail_retries
+        self.unknown_tools += loop.unknown_tools
         self.calls_per_instance.extend(loop.calls_per_instance)
         self.recalled.extend(p for p in answer.off_list if p not in loop.surfaced)
 

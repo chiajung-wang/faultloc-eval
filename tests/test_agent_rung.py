@@ -296,3 +296,20 @@ class TestTheEvaluationBudget:
 
         with pytest.raises(BudgetExceededError):
             engine.predict(instance(repo))
+
+    def test_counts_a_tool_the_model_invented(self, repo: Fixture) -> None:
+        """Measured on the first real call: the agent asked for `search_content`
+        with `directory` and `fileTypes` arguments, none of which exist.
+
+        It costs a step, so an invented name quietly shrinks the Instance Budget.
+        The first smoke run reported `degraded 0/0/0` while this had happened.
+        """
+        engine = rung(
+            repo,
+            Reply(tool_calls=[{"name": "search_content", "args": {"pattern": "x"}, "id": "u1"}]),
+            Reply(tool_calls=[submit("pkg/core.py")]),
+        )
+
+        engine.predict(instance(repo))
+
+        assert engine.unknown_tools == 1

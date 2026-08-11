@@ -189,3 +189,9 @@ class TestFailureNoteForRungFour:
         note = _failure_note(self.agent(calls_per_instance=[0, 0], max_tool_calls=0))
 
         assert "cap of 0 reached on 0/2" in note
+
+    def test_reports_a_tool_the_model_invented(self) -> None:
+        """It costs a step against the Instance Budget, so it cannot be silent."""
+        note = _failure_note(self.agent(unknown_tools=2))
+
+        assert "2 calls to tools that do not exist" in note
