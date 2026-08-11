@@ -240,15 +240,27 @@ class AgentLoop:
 
         return "nudge" if not state["nudged"] else "finish"
 
-    def _nudge(self, _state: AgentState) -> dict:
+    def _nudge(self, state: AgentState) -> dict:
         """One message telling the agent to answer, and a flag so it is the last.
 
         Reached when the tool budget is spent, or when a reply carried neither an
         answer nor a tool call. Without the flag this loop could ask forever.
+
+        **It must answer any tool call it is about to refuse.** This node is reached
+        precisely when the budget is already spent, so `act` never runs and nothing
+        else will reply to the call the agent just made. Leaving it unanswered is a
+        400 from the provider: "insufficient tool messages following tool_calls
+        message". That is how the second three-Instance run died, at the ninth call
+        of an eight-call budget.
         """
         self.nudges += 1
+        refused = [
+            ToolMessage(content=BUDGET_SPENT, tool_call_id=call.get("id", ""))
+            for call in getattr(state["messages"][-1], "tool_calls", ()) or ()
+            if call.get("name") != SUBMIT
+        ]
         return {
-            "messages": [HumanMessage(content=FINISH_NOW.format(submit=SUBMIT))],
+            "messages": [*refused, HumanMessage(content=FINISH_NOW.format(submit=SUBMIT))],
             "nudged": True,
         }
 

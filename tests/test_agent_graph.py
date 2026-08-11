@@ -498,3 +498,74 @@ class TestTheTranscriptStaysValid:
         )
 
         assert self.dangling(engine.run("find it", CANDIDATES)) == set()
+
+    def test_a_spent_budget_answers_the_call_it_refuses(self) -> None:
+        """How the second real run died, at the ninth call of an eight-call budget.
+
+        This node is reached precisely when the budget is already spent, so `act`
+        never runs and nothing else replies to the call the agent just made.
+        """
+        engine = loop(
+            Reply(tool_calls=[call("read_file", path="a.py")]),
+            Reply(tool_calls=[call("read_file", path="b.py")]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            max_tool_calls=1,
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert self.dangling(state) == set()
+        assert engine.nudges == 1
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            "answer_at_once",
+            "one_tool_then_answer",
+            "batch_over_the_cap",
+            "budget_spent_then_answer",
+            "never_answers",
+            "guardrail_rejects_then_answers",
+            "guardrail_rejects_twice",
+        ],
+    )
+    def test_no_scenario_leaves_a_dangling_call(self, scenario: str) -> None:
+        """The invariant over every path, not three hand-picked ones.
+
+        Choosing the scenarios by hand is what let the nudge path through: the
+        first version of this class covered a clipped batch and a guardrail retry,
+        and the bug lived in neither.
+        """
+        engines = {
+            "answer_at_once": lambda: loop(Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])])),
+            "one_tool_then_answer": lambda: loop(
+                Reply(tool_calls=[call("read_file", path="a.py")]),
+                Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            ),
+            "batch_over_the_cap": lambda: loop(
+                Reply(tool_calls=[call("read_file", path=f"{n}.py") for n in range(4)]),
+                Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+                max_tool_calls=2,
+            ),
+            "budget_spent_then_answer": lambda: loop(
+                Reply(tool_calls=[call("read_file", path="a.py")]),
+                Reply(tool_calls=[call("read_file", path="b.py")]),
+                Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+                max_tool_calls=1,
+            ),
+            "never_answers": lambda: loop(Reply(content="thinking"), Reply(content="still")),
+            "guardrail_rejects_then_answers": lambda: loop(
+                Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+                Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+                guardrail=FakeRail("pkg/core.py"),
+            ),
+            "guardrail_rejects_twice": lambda: loop(
+                Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+                Reply(tool_calls=[call(SUBMIT, paths=["phantom.py"])]),
+                guardrail=FakeRail("pkg/core.py"),
+            ),
+        }
+
+        state = engines[scenario]().run("find it", CANDIDATES)
+
+        assert self.dangling(state) == set()
