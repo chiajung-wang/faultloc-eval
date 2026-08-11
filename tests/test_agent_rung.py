@@ -15,11 +15,12 @@ from conftest import Fixture
 
 from faultloc.agent_answer import SUBMIT_RANKING_SCHEMA
 from faultloc.agent_client import AgentClient
-from faultloc.agent_tools import READ_FILE_SCHEMA
+from faultloc.agent_graph import AgentLoop
+from faultloc.agent_tools import Toolbox
 from faultloc.dataset.models import Instance
 from faultloc.llm import MODELS
 from faultloc.rungs import Prediction, StopCondition
-from faultloc.rungs.agent import AgentRung
+from faultloc.rungs.agent import READ_ONLY_SCHEMAS, AgentRung, _toolbox
 from faultloc.rungs.rerank import LlmRerankRung, render_candidates
 
 CANDIDATES = ("pkg/core.py", "pkg/util.py")
@@ -196,10 +197,29 @@ class TestTheZeroToolCell:
 
         assert engine.schemas == (SUBMIT_RANKING_SCHEMA,)
 
-    def test_offers_both_when_tools_are_allowed(self, repo: Fixture) -> None:
+    def test_offers_all_five_when_tools_are_allowed(self, repo: Fixture) -> None:
+        """ADR-0002's five, plus the terminal action."""
         engine = rung(repo, Reply(tool_calls=[submit("pkg/core.py")]), max_tool_calls=8)
 
-        assert engine.schemas == (READ_FILE_SCHEMA, SUBMIT_RANKING_SCHEMA)
+        assert engine.schemas == (*READ_ONLY_SCHEMAS, SUBMIT_RANKING_SCHEMA)
+        assert len(READ_ONLY_SCHEMAS) == 5
+
+    def test_every_schema_has_a_callable_and_the_reverse(self, repo: Fixture) -> None:
+        """A schema with no callable behind it reads to the agent as an invented
+        tool and costs a step. A callable with no schema is unreachable.
+
+        The first real run already lost one of eight calls to a tool the agent
+        invented, so a roster that drifts is not a theoretical problem.
+        """
+        engine = rung(repo, Reply(tool_calls=[submit("pkg/core.py")]), max_tool_calls=8)
+        loop = AgentLoop(
+            client=engine.client,
+            tools=_toolbox(Toolbox(repo.store, instance(repo))),
+        )
+
+        advertised = {s["function"]["name"] for s in READ_ONLY_SCHEMAS}
+
+        assert advertised == set(loop.tools)
 
     def test_still_answers_with_no_tools(self, repo: Fixture) -> None:
         engine = rung(repo, Reply(tool_calls=[submit("pkg/util.py")]), max_tool_calls=0)

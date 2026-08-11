@@ -27,7 +27,14 @@ from collections.abc import Sequence
 from faultloc.agent_answer import SUBMIT_RANKING_SCHEMA, Answer, Guardrail, assemble
 from faultloc.agent_client import AgentCache, AgentClient
 from faultloc.agent_graph import MAX_TOOL_CALLS, TIMEOUT_S, AgentLoop, stop_condition
-from faultloc.agent_tools import READ_FILE_SCHEMA, Toolbox
+from faultloc.agent_tools import (
+    FILE_OUTLINE_SCHEMA,
+    FIND_DEFINITION_SCHEMA,
+    READ_FILE_SCHEMA,
+    SEARCH_CODE_SCHEMA,
+    SEMANTIC_SEARCH_SCHEMA,
+    Toolbox,
+)
 from faultloc.dataset.models import Instance
 from faultloc.llm import MODELS, Model
 from faultloc.repos import RepoStore
@@ -46,6 +53,34 @@ MAX_TOKENS = 16000
 #: ADR-0009's Evaluation Budget. Checked against spend already incurred, so a run
 #: stops before it breaks the cap rather than reporting an overspend afterwards.
 BUDGET_USD = 12.00
+
+#: ADR-0002's five, and five is a ceiling rather than a floor: a larger surface
+#: degrades selection quality and inflates the cost of every step. At a cap of 8
+#: calls, one wasted call is an eighth of the Instance Budget -- and the first real
+#: run already lost one to a tool the agent invented.
+READ_ONLY_SCHEMAS = (
+    SEARCH_CODE_SCHEMA,
+    SEMANTIC_SEARCH_SCHEMA,
+    READ_FILE_SCHEMA,
+    FILE_OUTLINE_SCHEMA,
+    FIND_DEFINITION_SCHEMA,
+)
+
+
+def _toolbox(box: Toolbox) -> dict:
+    """Name to callable, matching `READ_ONLY_SCHEMAS` exactly.
+
+    A schema the agent can see with no callable behind it reads as an invented
+    tool and costs a step. A callable with no schema is unreachable.
+    """
+    return {
+        "search_code": box.search_code,
+        "semantic_search": box.semantic_search,
+        "read_file": box.read_file,
+        "file_outline": box.file_outline,
+        "find_definition": box.find_definition,
+    }
+
 
 PROMPT = """\
 A bug was reported against a Python repository. Below are {n} candidate source \
@@ -100,11 +135,17 @@ class AgentRung:
         self.max_tool_calls = max_tool_calls
         self.timeout_s = timeout_s
 
+        # Dense retrieval comes from rung 2's index, and the warm start already
+        # loads it, so nothing new is pulled in. `EmbedRung.search` is the entry
+        # point, which keeps the tool and rung 2 scoring by the same rule.
+        dense_rung = getattr(self.candidates, "dense", None)
+        self._dense = dense_rung.search if dense_rung is not None else None
+
         # No read-only tools at a cap of zero. ADR-0009's zero-tool cell must call
         # `submit_ranking` at once, and offering tools it cannot afford would spend
         # a step on a refusal and measure the refusal rather than the scaffolding.
         self.schemas = (
-            (READ_FILE_SCHEMA, SUBMIT_RANKING_SCHEMA)
+            (*READ_ONLY_SCHEMAS, SUBMIT_RANKING_SCHEMA)
             if max_tool_calls
             else (SUBMIT_RANKING_SCHEMA,)
         )
@@ -166,7 +207,7 @@ class AgentRung:
 
         loop = AgentLoop(
             client=self.client,
-            tools={"read_file": Toolbox(self.store, instance).read_file},
+            tools=_toolbox(Toolbox(self.store, instance, dense=self._dense)),
             guardrail=Guardrail(self.store, instance),
             max_tool_calls=self.max_tool_calls,
             timeout_s=self.timeout_s,
