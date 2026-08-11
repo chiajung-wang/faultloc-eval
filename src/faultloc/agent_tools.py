@@ -40,6 +40,12 @@ from faultloc.repos import RepoStore
 #: guess: a request for two thousand lines cannot quietly cost the run a dollar.
 MAX_RESULT_CHARS = 4000
 
+#: Files one `search_code` call may name. Issue 01 measured the cost of this cap
+#: at one Instance of 27: a Ground-Truth File was reachable but sat outside the
+#: first 30 matches. The true match count goes beside the list, so a cap the agent
+#: can see drives a refinement instead of a biased slice.
+MAX_HITS = 30
+
 #: Lines a single `read_file` call may return, before the character cap applies.
 #: A bound on lines as well as characters, so a file of very long lines and a
 #: file of very short ones both return something a model can reason about.
@@ -153,10 +159,61 @@ class Toolbox:
 
         return ToolResult(f"{header}\n{rendered}", paths=(cleaned,), truncated=truncated)
 
+    def search_code(self, pattern: str) -> ToolResult:
+        """Source files containing `pattern` literally, at the pinned commit."""
+        cleaned = (pattern or "").strip()
+        if not cleaned:
+            return ToolResult("Give text to search for.", rejected=True)
+
+        try:
+            hits = self.store.grep(*self._pin, cleaned)
+        except Exception as broken:
+            raise ToolError(f"cannot search {self.instance.repo} at {self._pin[1]}") from broken
+
+        if not hits:
+            # Not a mistake. A search that finds nothing is a fact about the
+            # repository, and the agent needs it in order to try another term.
+            return ToolResult(f"No source file contains `{cleaned}` at this commit.")
+
+        shown = hits[:MAX_HITS]
+        header = f"{len(hits)} source files contain `{cleaned}`"
+        if len(hits) > len(shown):
+            header += f", showing the first {len(shown)} in repository order"
+        return ToolResult(
+            f"{header}:\n" + "\n".join(f"  {path}" for path in shown),
+            paths=shown,
+            truncated=len(hits) > len(shown),
+        )
+
     @property
     def _pin(self) -> tuple[str, str]:
         return (self.instance.repo, self.instance.base_commit)
 
+
+SEARCH_CODE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_code",
+        "description": (
+            "Find source files containing an exact string, at the repository's pinned commit. "
+            "The match is literal, so brackets and dots mean themselves. "
+            "Search for an identifier, a dotted name, or a function name. "
+            "Do NOT paste an error message: a report shows the rendered message and the code "
+            "holds the template, so the message itself appears in no file. Search the "
+            "identifiers inside it instead."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Exact text to find, for example get_queryset or Model.objects",
+                }
+            },
+            "required": ["pattern"],
+        },
+    },
+}
 
 #: The tool surface the model sees, in OpenAI function format. Written as plain
 #: data rather than taken from a decorator, so this module imports no framework

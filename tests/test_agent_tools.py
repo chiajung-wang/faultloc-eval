@@ -11,9 +11,11 @@ import pytest
 from conftest import Fixture
 
 from faultloc.agent_tools import (
+    MAX_HITS,
     MAX_RESULT_CHARS,
     MAX_RESULT_LINES,
     READ_FILE_SCHEMA,
+    SEARCH_CODE_SCHEMA,
     Toolbox,
     ToolError,
 )
@@ -233,3 +235,107 @@ def _read_synthetic(repo: Fixture, body: str, start: int, end: int):
     ).stdout.strip()
 
     return box(repo, sha).read_file("pkg/big.py", start=start, end=end)
+
+
+class TestSearchCode:
+    def test_finds_the_files_containing_the_text(self, repo: Fixture) -> None:
+        result = box(repo).search_code("def first")
+
+        assert "pkg/core.py" in result.text
+        assert result.paths == ("pkg/core.py",)
+
+    def test_searches_the_commit_the_instance_pins(self, repo: Fixture) -> None:
+        assert box(repo, repo.first).search_code("def second").paths == ()
+        assert box(repo, repo.second).search_code("def second").paths == ("pkg/core.py",)
+
+    def test_matches_literally_and_not_as_a_pattern(self, repo: Fixture) -> None:
+        """A report quotes text full of dots, brackets and asterisks, and every one
+        of them means itself. ADR-0009 first said "literal and regex" and was
+        corrected: literal is what issue 01 measured and what shipped."""
+        assert box(repo).search_code("f...t").paths == ()
+        assert box(repo).search_code("def first(): ...").paths == ("pkg/core.py",)
+
+    def test_reports_the_count_when_it_finds_some(self, repo: Fixture) -> None:
+        assert "1 source files contain" in box(repo).search_code("def first").text
+
+    def test_finding_nothing_is_a_fact_and_not_a_mistake(self, repo: Fixture) -> None:
+        """A search that finds nothing is information about the repository. The
+        agent needs it in order to try another term, and marking it as a mistake
+        would tell it the wrong thing."""
+        result = box(repo).search_code("nowhere_at_all")
+
+        assert result.paths == ()
+        assert not result.rejected
+        assert "No source file contains" in result.text
+
+    def test_an_empty_pattern_is_a_mistake(self, repo: Fixture) -> None:
+        assert box(repo).search_code("   ").rejected
+
+    def test_excludes_non_source_files(self, repo: Fixture) -> None:
+        """`tests/test_core.py` contains `first` and is not an answer. Filtered by
+        the same `is_source_file` that builds the Ground-Truth File Set."""
+        assert box(repo).search_code("first").paths == ("pkg/core.py",)
+
+    def test_caps_the_hits_and_reports_the_true_count(self, repo: Fixture) -> None:
+        """The cap the agent can see. Issue 01 measured its cost at one Instance of
+        27, and a silent cut would be a biased slice the agent cannot know about.
+        """
+        sha = _commit_many_files(repo, MAX_HITS + 12, "WIDGET_MARKER")
+        result = box(repo, sha).search_code("WIDGET_MARKER")
+
+        assert len(result.paths) == MAX_HITS
+        assert f"{MAX_HITS + 12} source files contain" in result.text
+        assert f"showing the first {MAX_HITS}" in result.text
+        assert result.truncated
+
+    def test_does_not_claim_truncation_when_it_showed_everything(self, repo: Fixture) -> None:
+        assert not box(repo).search_code("def first").truncated
+
+    def test_two_searches_are_byte_identical(self, repo: Fixture) -> None:
+        assert box(repo).search_code("first").text == box(repo).search_code("first").text
+
+    def test_a_missing_commit_ends_the_instance(self, repo: Fixture) -> None:
+        with pytest.raises(ToolError):
+            box(repo, "0" * 40).search_code("first")
+
+
+class TestSearchCodeSchema:
+    def test_names_the_tool(self) -> None:
+        assert SEARCH_CODE_SCHEMA["function"]["name"] == "search_code"
+
+    def test_warns_the_model_off_pasting_error_messages(self) -> None:
+        """Issue 01's sharpest finding: error strings reach NOTHING, zero of 27. A
+        report shows the rendered message and the code holds the template, so the
+        message appears in no file. Without this line the agent would waste steps
+        discovering that."""
+        description = SEARCH_CODE_SCHEMA["function"]["description"]
+
+        assert "Do NOT paste an error message" in description
+        assert "identifiers inside it" in description
+
+    def test_says_the_match_is_literal(self) -> None:
+        assert "literal" in SEARCH_CODE_SCHEMA["function"]["description"]
+
+
+def _commit_many_files(repo: Fixture, count: int, marker: str) -> str:
+    """Commit `count` source files that all contain `marker`, and return the SHA."""
+    import subprocess
+    from pathlib import Path
+
+    work = Path(repo.store.root).parent / "many"
+    subprocess.run(
+        ["git", "clone", "-q", str(repo.store.clone_path(repo.repo)), str(work)], check=True
+    )
+    for name, value in (("user.email", "t@example.com"), ("user.name", "T")):
+        subprocess.run(["git", "-C", str(work), "config", name, value], check=True)
+
+    for n in range(count):
+        (work / "pkg" / f"gen{n:03d}.py").write_text(f"{marker} = {n}\n")
+    subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(work), "commit", "-qm", "many"], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/many"], check=True
+    )
+    return subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()

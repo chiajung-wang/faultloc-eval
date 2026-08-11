@@ -43,7 +43,9 @@ Rung 4 replaces rung 3's single call. It does not chain onto rung 3's output.
 
 [ADR-0002](0002-no-code-execution.md)'s five stand: `search_code`, `semantic_search`, `read_file(path, start, end)`, `file_outline`, `find_definition`.
 
-`search_code` is a literal and regex search over source files at `base_commit`, through the bare clones `RepoStore` already holds. It is not BM25 over the same AST Chunks. It returns at most 30 hits **and it reports the true match count**, so a truncated result drives a refinement rather than a biased slice.
+`search_code` is a **literal** search over source files at `base_commit`, through the bare clones `RepoStore` already holds. It is not BM25 over the same AST Chunks. It returns at most 30 hits **and it reports the true match count**, so a truncated result drives a refinement rather than a biased slice.
+
+*Corrected 2026-08-11. This paragraph first said "literal and regex". Literal is what issue 01 measured, and literal is what shipped. A bug report quotes text full of dots, brackets and asterisks, and reading that as a pattern finds matches the reporter never wrote. Offering a regex mode as well would add a failure the agent can only discover by spending a step on it.*
 
 Every tool caps its output, and truncation is deterministic.
 
