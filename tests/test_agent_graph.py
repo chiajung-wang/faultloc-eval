@@ -8,6 +8,7 @@ and what happens on a tool error.
 
 from __future__ import annotations
 
+import itertools
 from typing import Any
 
 import pytest
@@ -48,8 +49,18 @@ def read(path: str = "pkg/core.py", **_: Any) -> ToolResult:
     return ToolResult(f"contents of {path}", paths=(path,))
 
 
+_ids = itertools.count()
+
+
 def call(name: str, **args: Any) -> dict:
-    return {"name": name, "args": args, "id": f"c{abs(hash(name)) % 97}"}
+    """A tool call with a UNIQUE id.
+
+    Ids were derived from the tool name, so two `submit_ranking` calls in one
+    transcript shared one id. That is not merely unrealistic -- it hid a real bug,
+    because a dangling-call check keyed by id collapsed the two into the last one
+    and then exempted it. A real provider issues a fresh id per call.
+    """
+    return {"name": name, "args": args, "id": f"c{next(_ids)}"}
 
 
 def loop(*replies: Any, tools: dict | None = None, **overrides: Any) -> AgentLoop:
@@ -409,3 +420,81 @@ class TestTheGuardrailInsideTheLoop:
         state = engine.run("find it", CANDIDATES)
 
         assert state["tool_calls_used"] == 0
+
+
+class TestTheTranscriptStaysValid:
+    """Every tool call the loop sends again must already have an answer.
+
+    An OpenAI-compatible API rejects an assistant message whose tool calls have no
+    matching tool results, with a 400 that no retry can fix. This arrived on the
+    second Instance of the first real run, and none of the tests above could see
+    it: the scripted client accepts any shape.
+
+    The last `submit_ranking` is exempt. The run ends on it, so that transcript is
+    never sent anywhere.
+    """
+
+    @staticmethod
+    def dangling(state) -> set[str]:
+        """Unanswered tool calls, exempting only the ones in the FINAL message.
+
+        The exemption has to be that narrow. An earlier version exempted every
+        `submit_ranking` call, which hid a real bug: the guardrail retry re-sent a
+        transcript whose rejected submission had no answer, and the test could not
+        see it because the exemption covered that call too.
+        """
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        asked: dict[str, int] = {}
+        answered: set[str] = set()
+        for position, message in enumerate(state["messages"]):
+            if isinstance(message, AIMessage):
+                for tc in message.tool_calls or []:
+                    asked[tc["id"]] = position
+            if isinstance(message, ToolMessage):
+                answered.add(message.tool_call_id)
+
+        final = len(state["messages"]) - 1
+        return {i for i, position in asked.items() if i not in answered and position != final}
+
+    def test_a_clipped_batch_answers_every_call_it_refused(self) -> None:
+        over = Reply(tool_calls=[call("read_file", path=f"{n}.py") for n in range(5)])
+        engine = loop(
+            over, Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]), max_tool_calls=2
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert self.dangling(state) == set()
+        assert state["tool_calls_used"] == 2
+
+    def test_a_refused_call_says_why_and_costs_nothing(self) -> None:
+        over = Reply(tool_calls=[call("read_file", path=f"{n}.py") for n in range(3)])
+        engine = loop(
+            over, Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]), max_tool_calls=1
+        )
+
+        state = engine.run("find it", CANDIDATES)
+        transcript = " ".join(str(m.content) for m in state["messages"])
+
+        assert "budget for this instance is spent" in transcript
+        assert engine.tool_calls == 1
+
+    def test_a_guardrail_retry_answers_the_submission_it_rejected(self) -> None:
+        engine = loop(
+            Reply(tool_calls=[call(SUBMIT, paths=["ghost.py"])]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+            guardrail=FakeRail("pkg/core.py"),
+        )
+
+        state = engine.run("find it", CANDIDATES)
+
+        assert self.dangling(state) == set()
+
+    def test_an_ordinary_run_leaves_nothing_dangling(self) -> None:
+        engine = loop(
+            Reply(tool_calls=[call("read_file", path="pkg/core.py")]),
+            Reply(tool_calls=[call(SUBMIT, paths=["pkg/core.py"])]),
+        )
+
+        assert self.dangling(engine.run("find it", CANDIDATES)) == set()

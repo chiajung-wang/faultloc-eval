@@ -71,6 +71,10 @@ TIMEOUT_S = 600.0
 #: would silently get seven search calls instead of eight.
 SUBMIT = "submit_ranking"
 
+#: The answer to a tool call the Instance Budget refused to run. It keeps the
+#: transcript valid and tells the agent why nothing came back.
+BUDGET_SPENT = "Not run: the tool-call budget for this instance is spent. Answer now."
+
 FINISH_NOW = (
     "Stop searching and answer now. Call {submit} with every candidate path, most likely first."
 )
@@ -272,10 +276,14 @@ class AgentLoop:
 
         if absent and not state["guardrail_retried"]:
             self.guardrail_retries += 1
+            # The submission is a tool call, so it needs a tool result before the
+            # transcript can be sent again. Same 400 as a clipped batch, reached by
+            # a different path.
             return {
                 "messages": [
-                    HumanMessage(
-                        content=REJECTED_PATHS.format(paths=", ".join(absent), submit=SUBMIT)
+                    ToolMessage(
+                        content=REJECTED_PATHS.format(paths=", ".join(absent), submit=SUBMIT),
+                        tool_call_id=_submit_call_id(state),
                     )
                 ],
                 "guardrail_retried": True,
@@ -317,8 +325,14 @@ class AgentLoop:
         spent = 0
 
         for call in getattr(last, "tool_calls", ()) or ():
+            # EVERY call gets a result, including one the cap refuses to run. An
+            # OpenAI-compatible API rejects an assistant message whose tool calls
+            # have no matching tool results, and a clipped batch left exactly that
+            # dangling. It arrived as a 400 on the second Instance of the first
+            # real run, and the fake client in the tests could not see it.
             if state["tool_calls_used"] + spent >= self.max_tool_calls:
-                break
+                results.append(ToolMessage(content=BUDGET_SPENT, tool_call_id=call.get("id", "")))
+                continue
 
             spent += 1
             results.append(
@@ -359,6 +373,15 @@ def submitted_paths(state: AgentState) -> tuple[str, ...]:
                 paths = (call.get("args") or {}).get("paths") or []
                 return tuple(str(p) for p in paths)
     return ()
+
+
+def _submit_call_id(state: AgentState) -> str:
+    """The id of the most recent `submit_ranking` call, so a reply can answer it."""
+    for message in reversed(state["messages"]):
+        for call in getattr(message, "tool_calls", ()) or ():
+            if call.get("name") == SUBMIT:
+                return str(call.get("id", ""))
+    return ""
 
 
 def stop_condition(state: AgentState) -> str:
