@@ -150,7 +150,9 @@ Tool calling on this exact route is measured rather than assumed. The [ADR-0005]
 
 The Ablation's first 162 Instances truncated **20% of replies**, and every one of
 those 32 replies spent the entire 16,000-token budget on reasoning while emitting
-**zero answer tokens**. Successful replies answer in 293 tokens at the median and
+**zero answer tokens**. *The finished run measured 58 of 244, which is 24%. The
+20% above is what the partial run showed, and it is left standing so the estimate
+and the measurement can be compared.* Successful replies answer in 293 tokens at the median and
 462 at the most.
 
 **Raising `MAX_TOKENS` cannot fix this.** The answer is not what overflows. More
@@ -177,6 +179,42 @@ runs. That is a real difference between the two, and it belongs beside their del
 **What this ADR will not do.** Switching the Ablation to reasoning-off would remove
 the truncation and destroy the Ablation: it must match the agent cell in model,
 route and reasoning, or it stops isolating the tools.
+
+## Amended again 2026-08-17 — the scaffolding is worth about ten points on its own
+
+The Ablation ran, and it changes how rung 4's delta must be read.
+
+**`agent-no-tools` scores 84.0% Top-1 (78.9-88.1), against the rung-3 ladder row's
+74.2%.** Paired McNemar puts that at **+9.8pp, p=0.0003**: it wins 33 Instances and
+loses 9, of 42 discordant. The difference is established rather than swallowed by
+overlapping intervals.
+
+**The cell makes no tool calls at all.** Median 0, and the cap of 0 was reached on
+0 of 244. Same model, same route, the same Candidate Set payload. What differs
+from rung 3 is the loop scaffolding and `submit_ranking` replacing free-text
+parsing.
+
+So the confound this ADR declared before either cell ran is real, and it is
+larger than the wording above implies. "Part of rung 4's delta is a better output
+format" understates a ten-point effect.
+
+**What this does to the three comparisons.** The tools delta against
+`agent-no-tools` is now the only one that says anything about tools. The
+attributable delta against `rerank-deepseek-on` measures scaffolding *and* format
+*and* tools together, and roughly ten points of it are already spent before a
+single tool is called. The entry must not let a reader mistake the second for the
+first.
+
+**A reading this does not license.** It is tempting to conclude that the format
+fix alone buys ten points. The cell changes two things at once -- the loop
+scaffolding and the answer format -- and nothing here separates them. Rung 3 lost
+17 of 244 replies to unparseable content, which is 7pp of headroom at most, so the
+format cannot account for all of it. What the rest is remains unmeasured.
+
+**Sphinx moved.** It scores 68.2% here against the 63.6% where all four rung-3
+cells sat, which is exactly its Candidate Set hit@20. A cell with no tools should
+not pass a retrieval ceiling, so this is worth checking rather than celebrating:
+it may be noise at n=22, or it may mean the ceiling figure needs re-measuring.
 
 ## Revisit condition
 
