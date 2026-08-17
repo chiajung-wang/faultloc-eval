@@ -118,7 +118,7 @@ class AgentRung:
         *,
         candidates: Rung | None = None,
         evidence: EvidenceSource | None = None,
-        model: Model = MODELS["deepseek-on"],
+        model: Model = MODELS["deepseek-on-bounded"],
         client: AgentClient | None = None,
         cache: AgentCache | None = None,
         budget_usd: float = BUDGET_USD,

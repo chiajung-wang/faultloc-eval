@@ -153,6 +153,27 @@ MODELS = {
         provider="deepseek",
         reasoning=None,
     ),
+    # Rung 4's pin. Same model, same route, reasoning still on -- but bounded.
+    #
+    # `reasoning=None` leaves the provider's own default, and at rung 4 that
+    # default runs away. Measured over 112 replies on the zero-tool cell: 15 of
+    # them spent the ENTIRE 16,000-token budget on reasoning and emitted no
+    # answer at all, exactly at the cap, and each cost 3.6x an ordinary reply.
+    #
+    # 6,000 is sized from the replies that succeeded. Their reasoning has a
+    # median of 762 tokens and a p90 of 5,254, and their answers need 248 at the
+    # median and 512 at the most. So this bound leaves every successful reply
+    # untouched and stops the tail, and MAX_TOKENS still holds ~10,000 spare for
+    # an answer that wants 512.
+    #
+    # Raising MAX_TOKENS instead would buy more of the failure: the answer is not
+    # what overflows.
+    "deepseek-on-bounded": Model(
+        label="deepseek-on-bounded",
+        name="deepseek/deepseek-v4-pro",
+        provider="deepseek",
+        reasoning={"max_tokens": 6000},
+    ),
 }
 
 
