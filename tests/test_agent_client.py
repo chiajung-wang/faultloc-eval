@@ -18,7 +18,13 @@ import httpx
 import pytest
 from openrouter.errors import OpenRouterError
 
-from faultloc.agent_client import AgentCache, AgentClient, AgentReply, canonical_key
+from faultloc.agent_client import (
+    AgentCache,
+    AgentClient,
+    AgentReply,
+    _is_retryable,
+    canonical_key,
+)
 from faultloc.llm import MODELS
 
 
@@ -332,16 +338,48 @@ class TestTheTransportSettings:
         engine = AgentClient(model=MODELS["deepseek-on"], **overrides)
         return engine, captured, FakeChat
 
-    def test_sets_a_request_timeout(self, monkeypatch) -> None:
-        """None means wait forever, and forever is not a failure anyone sees."""
+    def test_never_sets_the_librarys_request_timeout(self, monkeypatch) -> None:
+        """Setting it is what makes this client hang.
+
+        Measured: `request_timeout=10` produced no answer after 60 seconds, six
+        times its own value, while the same call without it returns in 1.3s and a
+        raw urllib request to the same endpoint returns in 1.7s. The parameter
+        does not bound a request, it breaks one. The bound lives in
+        `_call_with_deadline` instead.
+        """
         engine, captured, fake_chat = self.build()
         monkeypatch.setattr("langchain_openrouter.ChatOpenRouter", fake_chat)
         monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
         engine._connect()
 
-        assert captured["request_timeout"] == int(engine.timeout_s)
-        assert captured["request_timeout"] > 0
+        assert "request_timeout" not in captured
+
+    def test_abandons_a_call_that_outlives_the_deadline(self) -> None:
+        """A stalled step has to end, or a run hangs for hours.
+
+        The original failure was 49 minutes at 2% CPU with nothing written,
+        because no timeout existed and the retry loop only fires on an exception
+        that never arrived.
+        """
+        import time as clock
+
+        class Stalled:
+            def invoke(self, _messages):
+                clock.sleep(30)
+
+        engine = AgentClient(model=MODELS["deepseek-on"], chat=Stalled(), timeout_s=0.3)
+
+        started = clock.perf_counter()
+        with pytest.raises(httpx.ReadTimeout):
+            engine._call_with_deadline(engine.chat, [Human("hi")])
+
+        assert clock.perf_counter() - started < 5
+
+    def test_a_timed_out_call_is_retryable(self) -> None:
+        """It is raised as `httpx.ReadTimeout` so the existing classifier sees a
+        transport failure, which is what it is."""
+        assert _is_retryable(httpx.ReadTimeout("no reply after 300s"))
 
     def test_leaves_retrying_to_this_module(self, monkeypatch) -> None:
         """`max_retries` defaults to 2, so the framework retries beneath

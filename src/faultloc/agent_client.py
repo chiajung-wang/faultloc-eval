@@ -42,6 +42,8 @@ import json
 import os
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -256,12 +258,20 @@ class AgentClient:
         self.empty += reply.is_empty
 
     def _send(self, messages: Sequence[Any]) -> AgentReply:
-        """Retry while the provider is merely busy, then give up loudly."""
+        """Retry while the provider is merely busy, then give up loudly.
+
+        The call runs in a worker thread so a stalled step can be abandoned. The
+        library's own `request_timeout` cannot do this: setting it to 10 produced
+        no answer after 60 seconds, while the same call without it returns in
+        1.3s. An abandoned thread is not killed, and that is acceptable here --
+        it is blocked on a socket the process will close at exit, and the
+        alternative is a run that hangs for hours.
+        """
         client = self.chat or self._connect()
 
         for attempt in range(MAX_ATTEMPTS):
             try:
-                return _reply_from(client.invoke(messages))
+                return _reply_from(self._call_with_deadline(client, messages))
             # Caught broadly and then classified, rather than caught narrowly.
             # `_is_retryable` re-raises anything that is not a busy provider or a
             # dropped connection, so a bug still surfaces on the first attempt.
@@ -273,6 +283,22 @@ class AgentClient:
                 time.sleep(min(BACKOFF_S * 2**attempt, MAX_BACKOFF_S))
 
         raise AssertionError("unreachable: the final attempt either returns or raises")
+
+    def _call_with_deadline(self, client: Chat, messages: Sequence[Any]) -> Any:
+        """One call, abandoned if it outlives the step timeout.
+
+        A test injects `chat` directly and every such call is instant, so the
+        pool is only ever built for a real request.
+        """
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            return pool.submit(client.invoke, messages).result(timeout=self.timeout_s)
+        except FuturesTimeout as expired:
+            raise httpx.ReadTimeout(f"no reply after {self.timeout_s:.0f}s") from expired
+        finally:
+            # `wait=False` because a stalled call would otherwise block shutdown
+            # for exactly as long as the timeout was meant to avoid.
+            pool.shutdown(wait=False)
 
     def _connect(self) -> Chat:
         """Build the pinned chat model, once per client.
@@ -301,11 +327,17 @@ class AgentClient:
             reasoning=self.model.reasoning,
             max_tokens=self.max_tokens,
             openrouter_api_key=api_key(),
-            # `request_timeout` defaults to None, which is no timeout at all. A
-            # stalled read then hangs forever, and the retry loop below never
-            # fires because no exception ever arrives. A zero-tool run sat at 2%
-            # CPU for 49 minutes on exactly that, writing nothing.
-            request_timeout=int(self.timeout_s),
+            # NO `request_timeout` HERE, and that is deliberate. Setting it is
+            # what makes this client hang. Measured: `request_timeout=10` did not
+            # return after 60 seconds, six times its own value, while the same
+            # call without it answers in 1.3s and a raw urllib request to the same
+            # endpoint answers in 1.7s. So the parameter does not bound a request,
+            # it breaks one.
+            #
+            # This was added to fix a hang and caused a worse one. The original
+            # 49-minute stall is real, and the bound now lives in `_send`, which
+            # runs the call in a worker thread and abandons it. That works because
+            # it needs nothing from the library.
             # `max_retries` defaults to 2, so the framework was retrying beneath
             # `_is_retryable`, which is the thing that decides what may be
             # retried. Two layers of retry means a 400 gets attempted three times
