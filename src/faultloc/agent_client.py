@@ -49,7 +49,15 @@ from typing import Any, Protocol
 import httpx
 from openrouter.errors import OpenRouterError
 
-from faultloc.llm import BACKOFF_S, MAX_ATTEMPTS, MAX_BACKOFF_S, RETRYABLE, Model, api_key
+from faultloc.llm import (
+    BACKOFF_S,
+    DEFAULT_TIMEOUT_S,
+    MAX_ATTEMPTS,
+    MAX_BACKOFF_S,
+    RETRYABLE,
+    Model,
+    api_key,
+)
 
 DEFAULT_AGENT_CACHE = Path("data/cache/agent")
 
@@ -198,6 +206,11 @@ class AgentClient:
     model: Model
     tools: tuple[dict, ...] = ()
     max_tokens: int = 16000
+    #: Seconds to wait on one request. Shared with `llm.py`, which sized it from
+    #: measurement: DeepInfra took over 300s on a single Instance against a
+    #: 180-second default, and averaged 154. A timeout shorter than the slowest
+    #: route turns a working provider into a broken one.
+    timeout_s: float = DEFAULT_TIMEOUT_S
     cache: AgentCache | None = None
     chat: Chat | None = None
 
@@ -281,6 +294,16 @@ class AgentClient:
             reasoning=self.model.reasoning,
             max_tokens=self.max_tokens,
             openrouter_api_key=api_key(),
+            # `request_timeout` defaults to None, which is no timeout at all. A
+            # stalled read then hangs forever, and the retry loop below never
+            # fires because no exception ever arrives. A zero-tool run sat at 2%
+            # CPU for 49 minutes on exactly that, writing nothing.
+            request_timeout=int(self.timeout_s),
+            # `max_retries` defaults to 2, so the framework was retrying beneath
+            # `_is_retryable`, which is the thing that decides what may be
+            # retried. Two layers of retry means a 400 gets attempted three times
+            # and the backoff is not the one this module reasons about.
+            max_retries=0,
         )
         self._client = chat.bind_tools(self.tools) if self.tools else chat
         return self._client

@@ -309,3 +309,56 @@ class TestCache:
         engine.invoke([Human("hi")])
 
         assert (engine.calls, engine.cache_hits) == (2, 0)
+
+
+class TestTheTransportSettings:
+    """What a stalled connection does, and who owns the retry.
+
+    A zero-tool run sat at 2% CPU for 49 minutes writing nothing, because
+    `request_timeout` defaults to None and the retry loop only fires on an
+    exception that never arrived.
+    """
+
+    def build(self, **overrides):
+        captured = {}
+
+        class FakeChat:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def bind_tools(self, _tools):
+                return self
+
+        engine = AgentClient(model=MODELS["deepseek-on"], **overrides)
+        return engine, captured, FakeChat
+
+    def test_sets_a_request_timeout(self, monkeypatch) -> None:
+        """None means wait forever, and forever is not a failure anyone sees."""
+        engine, captured, fake_chat = self.build()
+        monkeypatch.setattr("langchain_openrouter.ChatOpenRouter", fake_chat)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+
+        engine._connect()
+
+        assert captured["request_timeout"] == int(engine.timeout_s)
+        assert captured["request_timeout"] > 0
+
+    def test_leaves_retrying_to_this_module(self, monkeypatch) -> None:
+        """`max_retries` defaults to 2, so the framework retries beneath
+        `_is_retryable` -- which is the thing that decides what may be retried at
+        all. Two layers means a 400 is attempted three times."""
+        engine, captured, fake_chat = self.build()
+        monkeypatch.setattr("langchain_openrouter.ChatOpenRouter", fake_chat)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+
+        engine._connect()
+
+        assert captured["max_retries"] == 0
+
+    def test_shares_the_timeout_that_llm_py_measured(self) -> None:
+        """DeepInfra took over 300s on a single Instance and averaged 154. A
+        timeout shorter than the slowest route turns a working provider into a
+        broken one."""
+        from faultloc.llm import DEFAULT_TIMEOUT_S
+
+        assert AgentClient(model=MODELS["deepseek-on"]).timeout_s == DEFAULT_TIMEOUT_S
