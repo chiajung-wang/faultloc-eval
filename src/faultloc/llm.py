@@ -160,19 +160,22 @@ MODELS = {
     # them spent the ENTIRE 16,000-token budget on reasoning and emitted no
     # answer at all, exactly at the cap, and each cost 3.6x an ordinary reply.
     #
-    # 6,000 is sized from the replies that succeeded. Their reasoning has a
-    # median of 762 tokens and a p90 of 5,254, and their answers need 248 at the
-    # median and 512 at the most. So this bound leaves every successful reply
-    # untouched and stops the tail, and MAX_TOKENS still holds ~10,000 spare for
-    # an answer that wants 512.
+    # `{"max_tokens": 6000}` was tried first and is SILENTLY IGNORED here. That
+    # field applies only where an endpoint advertises `supports_max_tokens`, and
+    # this route does not: `/models/{id}/endpoints` lists `reasoning`,
+    # `include_reasoning` and `reasoning_effort`, with `supports_max_tokens`
+    # unset. A reply still spent 16,000 reasoning tokens under a 6,000 "cap".
     #
-    # Raising MAX_TOKENS instead would buy more of the failure: the answer is not
-    # what overflows.
+    # `effort` is what the route honors. `low` rather than `medium`, because the
+    # replies that already succeeded reason for 762 tokens at the median, and
+    # their answers need 248 at the median and 512 at the most. Raising
+    # MAX_TOKENS instead would buy more of the failure: the answer is not what
+    # overflows.
     "deepseek-on-bounded": Model(
         label="deepseek-on-bounded",
         name="deepseek/deepseek-v4-pro",
         provider="deepseek",
-        reasoning={"max_tokens": 6000},
+        reasoning={"effort": "low"},
     ),
 }
 
