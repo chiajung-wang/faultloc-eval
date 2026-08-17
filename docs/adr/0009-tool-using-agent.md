@@ -146,6 +146,38 @@ Tool calling on this exact route is measured rather than assumed. The [ADR-0005]
 
 **One finding is carried out of M5's scope.** Free rank fusion beats the paid reranker on 6 Instances. That belongs to M7's escalation design, and it is recorded here so it is not lost.
 
+## Amended 2026-08-17 — the zero-tool cell truncates, and no setting fixes it
+
+The Ablation's first 162 Instances truncated **20% of replies**, and every one of
+those 32 replies spent the entire 16,000-token budget on reasoning while emitting
+**zero answer tokens**. Successful replies answer in 293 tokens at the median and
+462 at the most.
+
+**Raising `MAX_TOKENS` cannot fix this.** The answer is not what overflows. More
+budget buys more reasoning for a model that is already failing to stop, and it
+costs a full re-run of the cell because `max_tokens` is part of the response cache
+key.
+
+**No reasoning setting fixes it either.** `reasoning.max_tokens` is ignored on this
+route: `/models/{id}/endpoints` advertises `reasoning`, `include_reasoning` and
+`reasoning_effort`, and leaves `supports_max_tokens` unset. A reply spent 16,000
+tokens under a 6,000 "cap". `reasoning.effort` is honored, and `low` is already the
+floor. It helped — truncation fell from 30% to 20% — and it did not stop the tail.
+
+**So the 20% is published as a finding rather than engineered away.** It depresses
+the Ablation's Top-1, exactly as rung 3's 7% unparseable rate depressed 74.2%. A
+truncated reply falls back to Candidate Set order, so the cell under-reports the
+scaffolding rather than flattering it, and it still bounds what the tools must beat.
+
+**The finding itself is about the zero-tool design.** This cell must emit a whole
+20-path ranking in one reply, and one Instance in five, this model cannot. The
+agent cell spreads the same work across steps and truncated nothing in its smoke
+runs. That is a real difference between the two, and it belongs beside their delta.
+
+**What this ADR will not do.** Switching the Ablation to reasoning-off would remove
+the truncation and destroy the Ablation: it must match the agent cell in model,
+route and reasoning, or it stops isolating the tools.
+
 ## Revisit condition
 
 **If most Instances reach the cap of 8 tool calls**, the cap produced the number rather than the agent. The entry reports the distribution of tool-call counts, and that is the condition to raise it.
