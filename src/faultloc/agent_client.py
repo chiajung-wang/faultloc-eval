@@ -51,7 +51,6 @@ from openrouter.errors import OpenRouterError
 
 from faultloc.llm import (
     BACKOFF_S,
-    DEFAULT_TIMEOUT_S,
     MAX_ATTEMPTS,
     MAX_BACKOFF_S,
     RETRYABLE,
@@ -206,11 +205,19 @@ class AgentClient:
     model: Model
     tools: tuple[dict, ...] = ()
     max_tokens: int = 16000
-    #: Seconds to wait on one request. Shared with `llm.py`, which sized it from
-    #: measurement: DeepInfra took over 300s on a single Instance against a
-    #: 180-second default, and averaged 154. A timeout shorter than the slowest
-    #: route turns a working provider into a broken one.
-    timeout_s: float = DEFAULT_TIMEOUT_S
+    #: Seconds to wait on one STEP. Deliberately far shorter than `llm.py`'s 900,
+    #: which was sized for rung 3 where a single call does all the work and
+    #: DeepInfra took over 300 seconds on one Instance.
+    #:
+    #: A rung-4 step is not that. Measured at `effort=low`: 26.9s per Instance,
+    #: and the largest reply is 9,944 output tokens. So a step still unanswered at
+    #: 300s is dead, not slow, and waiting 900 for it wastes eleven times the
+    #: working case before the retry that would have fixed it.
+    #:
+    #: This matters because the waits multiply. Eight attempts at 900s is two
+    #: hours of hanging before a run gives up, and a run that finally raised
+    #: `ReadTimeout` after exhausting all eight is what set this number.
+    timeout_s: float = 300.0
     cache: AgentCache | None = None
     chat: Chat | None = None
 

@@ -355,10 +355,19 @@ class TestTheTransportSettings:
 
         assert captured["max_retries"] == 0
 
-    def test_shares_the_timeout_that_llm_py_measured(self) -> None:
-        """DeepInfra took over 300s on a single Instance and averaged 154. A
-        timeout shorter than the slowest route turns a working provider into a
-        broken one."""
+    def test_waits_far_less_than_rung_3_does(self) -> None:
+        """A rung-4 step is not a rung-3 call.
+
+        `llm.py` waits 900s because rung 3 does everything in one call and
+        DeepInfra once took over 300. A rung-4 step measures 26.9s, so a step
+        unanswered at 300s is dead rather than slow -- and the waits multiply,
+        because eight attempts at 900s is two hours of hanging before a run gives
+        up. A run that raised ReadTimeout after exhausting all eight is what set
+        this number.
+        """
         from faultloc.llm import DEFAULT_TIMEOUT_S
 
-        assert AgentClient(model=MODELS["deepseek-on"]).timeout_s == DEFAULT_TIMEOUT_S
+        timeout = AgentClient(model=MODELS["deepseek-on"]).timeout_s
+
+        assert timeout == 300.0
+        assert timeout < DEFAULT_TIMEOUT_S
