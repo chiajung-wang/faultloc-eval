@@ -1,6 +1,6 @@
 # 03 — ADR-0009: rung 4's design, its budgets, and two cells declared in advance
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -50,15 +50,15 @@ A grilling session on 2026-08-07 settled seventeen questions about rung 4. The r
 
 ## Acceptance criteria
 
-- [ ] `docs/adr/0009-*.md` exists, with Context, Decision, Rationale, Consequences, Revisit condition and Alternatives rejected
-- [ ] Every decision above appears with its rationale
-- [ ] Both cells are named before any run
-- [ ] The output-format confound is stated as a consequence, not left implicit
-- [ ] Alternatives rejected covers at least: the cold start, chaining onto rung 3, BM25 as `search_code`, a four-tool roster, a free-text answer, a sixth Stop Condition, a per-instance dollar cap, and a deferred ablation
-- [ ] It cites issue 01's reachability finding
-- [ ] `docs/PRD.md` and ADR-0008 use the Budget scope names, and the PRD's superseded caps say so
-- [ ] `docs/milestones.md` carries M5's amended done-when
-- [ ] ADR-0003's rung table and `CONTEXT.md` still agree with each other about rung 4
+- [x] `docs/adr/0009-*.md` exists, with Context, Decision, Rationale, Consequences, Revisit condition and Alternatives rejected
+- [x] Every decision above appears with its rationale
+- [x] Both cells are named before any run
+- [x] The output-format confound is stated as a consequence, not left implicit
+- [x] Alternatives rejected covers at least: the cold start, chaining onto rung 3, BM25 as `search_code`, a four-tool roster, a free-text answer, a sixth Stop Condition, a per-instance dollar cap, and a deferred ablation
+- [x] It cites issue 01's reachability finding
+- [x] `docs/PRD.md` and ADR-0008 use the Budget scope names, and the PRD's superseded caps say so
+- [x] `docs/milestones.md` carries M5's amended done-when
+- [x] ADR-0003's rung table and `CONTEXT.md` still agree with each other about rung 4
 
 ## Notes
 
@@ -71,3 +71,19 @@ Two decisions in that file came from the owner against a recommendation, and bot
 ## Blocked by
 
 - [01 — Is the target reachable? Grep-reachability where the Candidate Set misses](01-grep-reachability.md)
+
+
+## Comments
+
+**Closed 2026-08-17.** ADR-0009 shipped in commit `0bb25ba`, and the status line was simply never flipped afterwards. Every criterion was re-checked against the files rather than ticked from memory.
+
+**One was genuinely unmet.** ADR-0008 carried no Budget scope names at all. Its amendments say "per-run cap" throughout, meaning one evaluation of a split, and `CONTEXT.md` now reserves that word for three different scopes.
+
+The amendments keep their original wording. They are the record of what was decided and when, and rewriting them would be an edit rather than a correction. A terminology note sits above them instead, mapping "per-run" to the Evaluation Budget and pointing at ADR-0009's $12 and $20. A rung-4 Instance makes up to eight calls where a rung-3 Instance makes one, so ADR-0008's caps do not transfer.
+
+**Corrections ADR-0009 has taken since it was written**, both recorded in place:
+
+- `search_code` was described as "a literal and regex search". Literal is what issue 01 measured its 59.3% reachability with, and literal is what shipped.
+- Its cost and latency estimates ran high. The measured figures are about $3.0 and four hours per cell against ~$7.4 and ~6h, and issue 04's closing comment carries the arithmetic.
+
+**One claim it makes is now contradicted by evidence.** ADR-0009 sets the tool-call cap at 8 and names the distribution as its revisit condition. The cap has been reached on **6 of 6 Instances** across two smoke runs, median exactly 8. Issue 06 must report that, and if it holds at scale the published number belongs to the cap rather than to the agent.

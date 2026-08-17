@@ -309,6 +309,26 @@ The condition holds, so the row moves. **The ladder's rung-3 row is now `rerank-
 
 **Consequence for M5.** The ladder's rung-3 row and rung 4's attributable baseline are now different cells. ADR-0009 therefore reports three deltas rather than one, and it says which licenses which claim.
 
+## Terminology note, 2026-08-11 — "per-run cap" means the Evaluation Budget
+
+This ADR says **per-run cap** throughout, and it always means one evaluation of a
+whole split. `CONTEXT.md` now gives that scope a name, because the word *run* had
+come to mean three different things at once.
+
+| Scope | Name | What this ADR called it |
+|---|---|---|
+| one Instance | Instance Budget | not used at rung 3, which makes one call per Instance |
+| one evaluation of a split | **Evaluation Budget** | "per-run cap": $1.50, then $2.00 |
+| one milestone | **Milestone Budget** | "milestone cap": $5.00 |
+
+The amendments above keep their original wording. They are the record of what was
+decided and when, and rewriting them would be an edit rather than a correction.
+Read "per-run" there as the Evaluation Budget.
+
+**M5 raises both.** [ADR-0009](0009-tool-using-agent.md) sets an Evaluation Budget
+of $12 and a Milestone Budget of $20. A rung-4 Instance makes up to eight calls
+where a rung-3 Instance makes one, so this ADR's caps do not transfer.
+
 ## Provenance note, 2026-08-07 — the first-party DeepSeek serve is fp8
 
 The second amendment's route table lists the quantization of the `deepseek` first-party route as **unknown**. It is **fp8**.

@@ -10,13 +10,15 @@ Status: ready-for-human
 
 Two runs on the dev split, two `RESULTS.md` entries, and the report that closes the milestone.
 
-**This issue spends about $8.** The Evaluation Budget is $12 per run and the Milestone Budget is $20.
+**This issue spends about $4.** The Evaluation Budget is $12 per run and the Milestone Budget is $20.
+
+*Estimates corrected 2026-08-17 against issue 04's measurement. ADR-0009 put the main cell at ~$7.4 and ~6h before anything ran. Measured, it is $0.0107 to $0.0122 per Instance and about 59s, so ~$3.0 and ~4h.*
 
 ### The two cells
 
 | Cell | Tool-call cap | Estimated cost | Estimated wall clock |
 |---|---|---|---|
-| `agent` — the ladder row | 8 | ~$7.4 | ~6h |
+| `agent` — the ladder row | 8 | ~$3.0 | ~4h |
 | `agent-no-tools` — the Ablation | 0 | ~$0.60 | ~25m |
 
 Both pin `deepseek/deepseek-v4-pro` on the first-party `deepseek` route, reasoning at its default, and both were declared in ADR-0009 before either ran. The route serves fp8, and the entry records that beside the model ID and revision.
@@ -31,7 +33,22 @@ The response cache holds 244 replies for `gpt-oss-high` and **4** for `deepseek-
 
 Do not substitute the free cached cell. `rerank` replays for $0.00, and it is `gpt-oss-high` on DeepInfra at high effort. Rung 4 pins `deepseek-on` on the first-party route. Comparing across those moves the model, the route and the reasoning setting at once, which is the confound ADR-0009's pin exists to remove.
 
-Budget: ~$7.4 main cell, ~$0.60 zero-tool cell, ~$0.49 baseline. About **$8.5**, inside the $12 Evaluation Budget and the $20 Milestone Budget.
+Budget: ~$3.0 main cell, ~$0.60 zero-tool cell, ~$0.49 baseline. About **$4.1**, well inside the $12 Evaluation Budget and the $20 Milestone Budget. That leaves room for a full re-run if a fix changes the prompt.
+
+### Run order, and why the cheap cell goes first
+
+1. **`agent-no-tools`** — ~$0.60, ~25m. The sanity check as well as the Ablation.
+2. **`rerank-deepseek-on`** — ~$0.49, ~178m. The paired-test baseline.
+3. **`agent`** — ~$3.0, ~4h. The ladder row.
+
+The zero-tool cell is one call per Instance with no tools and no loop, and it
+still drives the whole 244-Instance harness: the Evaluation Budget, the
+predictions file, the `RESULTS.md` entry, and the failure note. A bug that only
+appears at scale therefore costs 25 minutes and $0.60 rather than four hours and
+$3. M4 lost $2.25 to a failure of exactly that shape.
+
+Commit between every run. A run's own `RESULTS.md` write dirties the tree, so two
+back to back can never both be clean.
 
 ### The two deltas
 
@@ -63,7 +80,8 @@ Update the README's results table and its narrative. Update `docs/milestones.md`
 - [ ] Both entries record the model ID, the revision, the provider tag and the serving precision
 - [ ] Neither run publishes from a dirty tree
 - [ ] The ladder delta and the tools delta are both reported, each with the paired test, and the entry states which licenses which claim
-- [ ] Tool-call distribution and cap-reached rate published
+- [ ] Tool-call distribution and cap-reached rate published, **and the entry states whether the cap bound the result** — both smoke runs reached it on 6 of 6 Instances, median exactly 8, so ADR-0009's revisit condition has fired every time so far
+- [ ] Per-tool contribution decides `semantic_search`'s slot, or says why it cannot — three of five tools recorded zero calls across the three smoke Instances, none of which was a `sphinx` Instance
 - [ ] Path Guardrail catch rate published
 - [ ] Accepted Off-List Paths counted, and the correct share reported
 - [ ] Tool-Reached split reported
