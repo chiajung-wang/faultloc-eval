@@ -22,6 +22,18 @@ embed = [
     "sentence-transformers>=3.0",
     "torch>=2.4",
 ]
+# Rung 4, the agent. Optional for the same reason `embed` is: rungs 1 through 3
+# need none of it. Rung 3 calls OpenRouter through `llm.py`, which is
+# hand-rolled `urllib`, so the ladder up to and including the LLM reranker
+# installs without a framework.
+#
+# ADR-0005 requires the dependency stays pinned, because framework version churn
+# is a maintenance risk. The floors here are the versions a probe confirmed on
+# 2026-08-07, and `uv.lock` carries the exact resolution.
+agent = [
+    "langgraph>=1.2.10",
+    "langchain-openrouter>=0.2.7",
+]
 
 [dependency-groups]
 dev = [

@@ -72,6 +72,23 @@ that are not in the list.
 """
 
 
+def render_candidates(chunks: dict[str, str], head: Sequence[str]) -> str:
+    """The Candidate Set as the model sees it: a path, then its Evidence Chunk.
+
+    Extracted so rung 4 can send the identical payload. ADR-0009 starts the agent
+    warm from this exact text, and its attributable delta only means something
+    while the two rungs agree byte for byte about what a candidate looks like.
+    Duplicating the format would let them drift apart silently.
+
+    The instructions around this block are *not* shared. Rung 3 asks for paths in
+    a reply, and rung 4 asks for a `submit_ranking` call. ADR-0009 declares that
+    difference as a confound and buys the zero-tool cell to price it.
+    """
+    return "\n\n".join(
+        f"### {path}\n{chunks.get(path) or '(no snippet available)'}" for path in head
+    )
+
+
 class BudgetExceededError(RuntimeError):
     """The run has spent its cap. Raised rather than returned.
 
@@ -189,10 +206,7 @@ class LlmRerankRung:
             )
 
     def _prompt(self, instance: Instance, head: Sequence[str]) -> str:
-        chunks = self.evidence(instance, head)
-        rendered = "\n\n".join(
-            f"### {path}\n{chunks.get(path) or '(no snippet available)'}" for path in head
-        )
+        rendered = render_candidates(self.evidence(instance, head), head)
         return PROMPT.format(n=len(head), issue=instance.issue_text, candidates=rendered)
 
     def _parse(self, text: str, head: Sequence[str]) -> list[str]:

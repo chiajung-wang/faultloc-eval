@@ -147,3 +147,58 @@ class TestMissingThings:
     def test_has_clone_reports_presence(self, repo: Fixture) -> None:
         assert repo.store.has_clone("acme/widget")
         assert not repo.store.has_clone("nobody/nothing")
+
+
+class TestGrep:
+    def test_finds_a_file_by_its_contents(self, repo: Fixture) -> None:
+        assert repo.store.grep("acme/widget", repo.first, "def first") == ("pkg/core.py",)
+
+    def test_searches_the_commit_it_is_given(self, repo: Fixture) -> None:
+        """`pkg/core.py` says `def first` at one commit and `def second` at the next.
+
+        A grep against the clone's default branch would answer for whichever
+        commit that happens to be, and every Instance pins its own.
+        """
+        assert repo.store.grep("acme/widget", repo.first, "def second") == ()
+        assert repo.store.grep("acme/widget", repo.second, "def second") == ("pkg/core.py",)
+
+    def test_drops_non_source_files_from_the_matches(self, repo: Fixture) -> None:
+        """`tests/test_core.py` also contains `first`, and it is not an answer.
+
+        Filtered by the same `is_source_file` that builds the Ground-Truth File
+        Set. If the two disagreed, a tool could offer a file that no prediction
+        is ever scored against.
+        """
+        assert repo.store.grep("acme/widget", repo.first, "first") == ("pkg/core.py",)
+
+    def test_searches_for_a_literal_string_and_not_a_pattern(self, repo: Fixture) -> None:
+        """`f...t` is a regex that matches `first`, and a string that matches nothing.
+
+        Bug reports quote error text full of dots, brackets and asterisks. Read
+        as a regex, that text finds matches the reporter never wrote.
+        """
+        assert repo.store.grep("acme/widget", repo.first, "f...t") == ()
+        assert repo.store.grep("acme/widget", repo.first, "def first(): ...") == ("pkg/core.py",)
+
+    def test_does_not_reorder_what_the_search_returned(self, repo: Fixture) -> None:
+        """A caller that truncates has to truncate the order the search produced.
+
+        This catches a reordering, and it cannot catch a *sort*. Git walks a tree
+        in byte order of the full path, which for these fixtures is the same
+        order `sorted()` gives. So the test states the weaker guarantee it can
+        actually hold: the method returns git's order and does not rearrange it.
+        """
+        assert repo.store.grep("acme/widget", repo.second, "E") == ("pkg/added.py", "pkg/util.py")
+
+    def test_no_match_is_an_answer_and_not_a_failure(self, repo: Fixture) -> None:
+        """git grep exits 1 when nothing matches, and that must not raise."""
+        assert repo.store.grep("acme/widget", repo.first, "nothing here") == ()
+
+    def test_a_missing_commit_raises(self, repo: Fixture) -> None:
+        with pytest.raises(CommitUnavailableError):
+            repo.store.grep("acme/widget", "0" * 40, "first")
+
+    def test_a_missing_clone_raises(self, tmp_path: Path) -> None:
+        store = RepoStore(root=tmp_path / "none", cache_root=tmp_path / "cache")
+        with pytest.raises(RepoUnavailableError, match="ensure_clone"):
+            store.grep("acme/widget", "0" * 40, "first")

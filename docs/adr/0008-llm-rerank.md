@@ -283,3 +283,60 @@ Stated rather than quietly rebased, because a cap that resets whenever it is inc
 | ladder row, wall clock | 34 min | **20 min** |
 
 Both estimates ran high because only three instances absorbed the fixed startup cost. That startup loads the benchmark, the splits, and the retriever's encoder. The overrun on the first attempt came from the other three cells. Their estimates rested on two-instance samples, and nobody has re-measured them.
+
+## Amended a fourth time 2026-08-10 — the ladder's rung-3 row moves to reasoning off
+
+This ADR wrote the condition for this move before any number existed:
+
+> **If the thinking Ablation shows the mode buys nothing**, the ladder row moves to thinking-off. That is 44% cheaper on Model A and 58% on Model B. Publish the move as a correction rather than a quiet edit.
+
+The condition holds, so the row moves. **The ladder's rung-3 row is now `rerank-deepseek-off`.**
+
+| Cell | Top-1 | Cost | Wall clock |
+|---|---|---|---|
+| `rerank-deepseek-on` | 79.1% (73.6-83.7) | $0.49 | 178m |
+| **`rerank-deepseek-off`** | **75.0% (69.2-80.0)** | **$0.31** | **22m** |
+| `rerank` — the old row, gpt-oss-high | 74.2% (68.3-79.3) | $0.39 | 186m |
+| `rerank-gpt-oss-low` | 72.5% (66.6-77.8) | $0.76 | 9m |
+
+`rerank-deepseek-off` is the only cell that breaks the trade between cost and speed. It is the cheapest to run and the second fastest, and it scores second of the four. Reasoning buys 4.1pp on this model, and that sits inside the ±6pp interval this project reports at n=244.
+
+**What moves.** The row a reader should deploy, and the row the README's ladder table names.
+
+**What does not move.** M4's published entries all stay exactly as they are. The old row, `rerank` at 74.2%, was declared in advance and it stays on the record as the row this ADR originally named. A number is not withdrawn because a cheaper configuration turned out to be as good.
+
+**The 4.1pp this gives up is stated rather than hidden.** `deepseek-off` also produced **43 Off-List Paths** against `deepseek-on`'s 14. That is the worst hallucination rate of the four cells. It costs a reranker very little, because a reranker discards a path that was never a candidate. It would cost an agent a great deal, which is why [ADR-0009](0009-tool-using-agent.md) pins rung 4 to reasoning **on** while this row moves to reasoning off. The two decisions point in opposite directions on purpose, and each one is made against the metric that matters for its own rung.
+
+**Consequence for M5.** The ladder's rung-3 row and rung 4's attributable baseline are now different cells. ADR-0009 therefore reports three deltas rather than one, and it says which licenses which claim.
+
+## Terminology note, 2026-08-11 — "per-run cap" means the Evaluation Budget
+
+This ADR says **per-run cap** throughout, and it always means one evaluation of a
+whole split. `CONTEXT.md` now gives that scope a name, because the word *run* had
+come to mean three different things at once.
+
+| Scope | Name | What this ADR called it |
+|---|---|---|
+| one Instance | Instance Budget | not used at rung 3, which makes one call per Instance |
+| one evaluation of a split | **Evaluation Budget** | "per-run cap": $1.50, then $2.00 |
+| one milestone | **Milestone Budget** | "milestone cap": $5.00 |
+
+The amendments above keep their original wording. They are the record of what was
+decided and when, and rewriting them would be an edit rather than a correction.
+Read "per-run" there as the Evaluation Budget.
+
+**M5 raises both.** [ADR-0009](0009-tool-using-agent.md) sets an Evaluation Budget
+of $12 and a Milestone Budget of $20. A rung-4 Instance makes up to eight calls
+where a rung-3 Instance makes one, so this ADR's caps do not transfer.
+
+## Provenance note, 2026-08-07 — the first-party DeepSeek serve is fp8
+
+The second amendment's route table lists the quantization of the `deepseek` first-party route as **unknown**. It is **fp8**.
+
+A probe for M5 returned `system_fingerprint` as `fp_9954b31ca7_prod0820_fp8_kvcache_20260402`. That table stays as written, and this note sits beside it.
+
+**This changes no decision.** The route was never pinned on precision, and the third amendment already established that precision is not the trade it appears to be.
+
+**It fills a gap in the provenance record.** Two of M4's four published rows ran on this route. Each entry names a model, a revision and a provider tag. Neither states the precision that produced the number, and nobody could state it before now. A reader who routes elsewhere gets different weights, and this note is what makes that comparison possible for these two rows.
+
+**It does not fill the other gap.** Nobody has measured whether serving precision moves *accuracy* on this task. The third amendment says so, and that still holds.

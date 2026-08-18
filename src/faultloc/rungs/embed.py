@@ -70,36 +70,43 @@ class EmbedRung:
     def predict(self, instance: Instance) -> Prediction:
         started = time.perf_counter()
 
-        files = self.store.list_source_files(instance.repo, instance.base_commit)
-        if not files:
+        ranked = self._ranked(instance, instance.issue_text)
+        if not ranked:
             return self._prediction(instance, (), StopCondition.NO_CANDIDATES, started)
 
-        query = self._query_vector(instance.issue_text)
+        return self._prediction(instance, ranked, StopCondition.ANSWERED, started)
 
+    def search(self, instance: Instance, query: str, limit: int) -> tuple[str, ...]:
+        """The `limit` best-matching files for an arbitrary query.
+
+        Rung 4's `semantic_search` calls this, so the tool and rung 2 score by the
+        same rule. Its new power over the warm start is the *query*: the Candidate
+        Set was built from the raw issue text, and the agent writes its own.
+
+        The whole ranking is computed and then cut, exactly as `predict` does,
+        which keeps the two orders identical for the same query.
+        """
+        return self._ranked(instance, query)[:limit]
+
+    def _ranked(self, instance: Instance, query: str) -> tuple[str, ...]:
+        """Every file with a chunk in the index, best first, ties broken by path."""
+        files = self.store.list_source_files(instance.repo, instance.base_commit)
+        if not files:
+            return ()
+
+        vector = self._query_vector(query)
         by_file: dict[str, list[float]] = {}
         for file in files:
             vectors = self.index.read(file.blob)
             if vectors.size == 0:
                 continue
-            by_file.setdefault(file.path, []).extend((vectors @ query).tolist())
+            by_file.setdefault(file.path, []).extend((vectors @ vector).tolist())
 
-        if not by_file:
-            return self._prediction(instance, (), StopCondition.NO_CANDIDATES, started)
-
-        # Aggregate first, then sort, ties broken by path -- identical to the
-        # lexical rungs. Without the tiebreak the order would follow git's
-        # enumeration and determinism would hold only by luck.
         ranked = sorted(
             ((path, aggregate_by_file(scores)) for path, scores in by_file.items()),
             key=lambda pair: (-pair[1], pair[0]),
         )
-
-        return self._prediction(
-            instance,
-            tuple(path for path, _score in ranked),
-            StopCondition.ANSWERED,
-            started,
-        )
+        return tuple(path for path, _score in ranked)
 
     def _query_vector(self, issue_text: str) -> np.ndarray:
         """Embed the issue, with the model's query instruction attached.

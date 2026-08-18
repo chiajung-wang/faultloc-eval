@@ -198,6 +198,57 @@ class RepoStore:
             raise CommitUnavailableError(f"{path} not found in {repo} at {commit}")
         return result.stdout.decode("utf-8", errors="replace")
 
+    def grep(self, repo: str, commit: str, pattern: str) -> tuple[str, ...]:
+        """Source files containing `pattern` at `commit`, in git's tree order.
+
+        A literal search, not a regular expression. `-F` is what makes a caller
+        safe: a bug report quotes `TypeError: cannot convert 'NoneType'`, and
+        every bracket and dot in that string means itself. A regex search over
+        report text finds matches the reporter never wrote.
+
+        The order is git's own and this method does not sort it. A caller that
+        truncates must truncate the order the search produced, or its truncated
+        slice would answer a different question from the tool's.
+
+        Returns paths and not lines, because the question above this method is
+        always *which file*. `is_source_file` filters the result rather than a
+        pathspec, so this method and the Candidate Set agree on what source is.
+        A pathspec of `*.py` would disagree: ADR-0001's rule is a deny-list, and
+        real fixes touch `.pyx` and `.c` files.
+        """
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self._require_clone(repo)),
+                "grep",
+                "--fixed-strings",
+                "--files-with-matches",
+                "--no-color",
+                "-I",  # skip binary files rather than print "Binary file matches"
+                "-e",
+                pattern,
+                commit,
+            ],
+            capture_output=True,
+            check=False,
+        )
+        # git grep exits 1 for "no match", which is an answer and not a failure.
+        # Anything above that is a real error, and a bad commit is the likely one.
+        if result.returncode > 1:
+            raise CommitUnavailableError(
+                f"grep failed in {repo} at {commit}: "
+                f"{result.stderr.decode('utf-8', errors='replace').strip()}"
+            )
+
+        paths = []
+        for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+            # `git grep <commit>` prefixes every path with "<commit>:".
+            _found_in, _, path = line.partition(":")
+            if path and is_source_file(path):
+                paths.append(path)
+        return tuple(paths)
+
     def _require_clone(self, repo: str) -> Path:
         path = self.clone_path(repo)
         if not path.is_dir():

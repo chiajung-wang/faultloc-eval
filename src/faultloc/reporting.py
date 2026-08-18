@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 
 from faultloc.dataset.verified import LoadReport
-from faultloc.scoring import ScoreReport
+from faultloc.scoring import PairedComparison, ScoreReport
 
 RESULTS_HEADER = """# Results
 
@@ -100,14 +100,30 @@ def _filter_line(load: LoadReport) -> str:
     )
 
 
+def _predictions_line(predictions: Path | None) -> str:
+    """The bullet naming this run's per-instance results, or nothing.
+
+    Written as a continuation of the provenance list, so an entry without stored
+    Predictions renders exactly as every entry before M5 did.
+    """
+    return f"\n- Predictions: `{predictions}`" if predictions else ""
+
+
 def render_entry(
     report: ScoreReport,
     provenance: Provenance,
     load: LoadReport,
     wall_clock_s: float,
     note: str = "",
+    predictions: Path | None = None,
 ) -> str:
-    """One `RESULTS.md` block."""
+    """One `RESULTS.md` block.
+
+    `predictions` names the file holding this run's per-instance results. The
+    entry carries it so a paired test against another rung can be traced back to
+    the two runs that produced it. Optional, because `data/` is gitignored and a
+    reader of the log may not hold the file.
+    """
     low, high = report.overall.top_1_ci
     overall = report.overall
 
@@ -137,7 +153,7 @@ def render_entry(
 - code `{provenance.code_sha}` · dataset `{provenance.dataset}` @ \
 `{provenance.dataset_revision[:7]}` · split `{provenance.split}` (seed {provenance.seed})
 - {_filter_line(load)}
-- Reproduce: `{provenance.command}`
+- Reproduce: `{provenance.command}`{_predictions_line(predictions)}
 
 **Read**: {note or UNRECORDED_NOTE}
 """
@@ -196,6 +212,62 @@ def render_terminal(
         lines.append("  WARNING: uncommitted changes present; this run is not reproducible")
 
     return "\n".join(lines)
+
+
+def render_comparison(
+    result: PairedComparison,
+    a_provenance: Provenance,
+    b_provenance: Provenance,
+) -> str:
+    """A paired comparison, with the reading spelled out.
+
+    The verdict is stated rather than left to a reader who might take an
+    overlapping pair of Wilson intervals as the answer. That is the whole reason
+    this test exists, so the output says which instrument licenses the claim.
+    """
+    significant = result.p_value < 0.05
+    if result.discordant == 0:
+        verdict = f"{result.a} and {result.b} agree on every Instance. Nothing to test."
+    elif significant:
+        verdict = (
+            f"The difference is established. {result.b} beats {result.a} on "
+            f"{result.b_only} Instances and loses on {result.a_only}, "
+            f"p={result.p_value:.4g}."
+            if result.b_only > result.a_only
+            else (
+                f"The difference is established, and it goes the other way. "
+                f"{result.a} beats {result.b} on {result.a_only} Instances "
+                f"and loses on {result.b_only}, p={result.p_value:.4g}."
+            )
+        )
+    else:
+        verdict = (
+            f"Nothing established. {result.b_only} against {result.a_only} "
+            f"discordant Instances, p={result.p_value:.4g}."
+        )
+
+    return "\n".join(
+        [
+            f"{result.b} against {result.a} · paired · n={result.n}",
+            "",
+            f"  Top-1 delta   {result.top_1_delta:+.1%}   ({result.b} minus {result.a})",
+            f"  p-value       {result.p_value:.4g}   (two-sided exact McNemar)",
+            "",
+            f"  {'both right':16}{result.both_hit:5d}",
+            f"  {'both wrong':16}{result.both_miss:5d}",
+            f"  {result.b + ' only':16}{result.b_only:5d}",
+            f"  {result.a + ' only':16}{result.a_only:5d}",
+            f"  {'discordant':16}{result.discordant:5d}   the whole evidence",
+            "",
+            f"  {verdict}",
+            "",
+            "  A Wilson interval on either row describes that row alone. This test",
+            "  is what licenses a claim about the difference between them.",
+            "",
+            f"  {result.a}: code {a_provenance.code_sha} · run {a_provenance.run_date}",
+            f"  {result.b}: code {b_provenance.code_sha} · run {b_provenance.run_date}",
+        ]
+    )
 
 
 def today() -> str:

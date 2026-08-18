@@ -77,6 +77,115 @@ def wilson_interval(successes: int, total: int, z: float = Z_95) -> tuple[float,
 
 
 @dataclass(frozen=True)
+class PairedComparison:
+    """Two rungs judged against each other on the same Instances.
+
+    The Wilson interval above describes one row's Top-1 on its own, and it
+    treats two rows as separate samples. They are not separate. Every rung runs
+    the same Instances of the same split, so the sampling error the interval
+    describes is *shared* between them, and comparing two intervals throws that
+    away.
+
+    Issue 01 made this load-bearing rather than tidy. It measured rung 4's whole
+    available delta over rung 3 at about 6.6 points, against an interval of
+    ±6pp. A rung 4 that found every reachable Instance would still publish
+    overlapping intervals and establish nothing.
+
+    The discordant Instances are the evidence. An Instance both rungs get right,
+    or both get wrong, says nothing about which is better.
+    """
+
+    a: str
+    b: str
+    n: int
+    both_hit: int
+    both_miss: int
+    a_only: int
+    b_only: int
+    p_value: float
+
+    @property
+    def discordant(self) -> int:
+        return self.a_only + self.b_only
+
+    @property
+    def top_1_delta(self) -> float:
+        """`b` minus `a`, which is what the ladder reports as a rung's delta."""
+        return (self.b_only - self.a_only) / self.n if self.n else 0.0
+
+
+def mcnemar_p_value(a_only: int, b_only: int) -> float:
+    """Two-sided exact McNemar, by the binomial sign test.
+
+    Exact rather than the chi-square approximation, because the discordant count
+    here is small. Issue 01 put rung 4's reachable gain at 16 Instances, so the
+    approximation would run on a handful of counts and its correction terms would
+    matter more than the data.
+
+    No SciPy. The whole test is a binomial tail, `math.comb` computes it exactly,
+    and a dependency for one formula would have to be justified in an ADR.
+
+    With no discordant Instances the two rungs agreed everywhere, so there is
+    nothing to test and the p-value is 1.0.
+    """
+    trials = a_only + b_only
+    if trials == 0:
+        return 1.0
+
+    tail = sum(math.comb(trials, i) for i in range(min(a_only, b_only) + 1))
+    return min(1.0, 2 * tail / 2**trials)
+
+
+def compare(
+    a_predictions: Sequence[Prediction],
+    b_predictions: Sequence[Prediction],
+    instances: Sequence[Instance],
+    *,
+    a: str,
+    b: str,
+) -> PairedComparison:
+    """Pair two runs by Instance and test the difference in Top-1.
+
+    Refuses two runs that did not answer the same Instances. A paired test over
+    a partial overlap would silently compare two different benchmarks, which is
+    the same error `--limit` refuses to publish.
+    """
+    by_id = {i.instance_id: i for i in instances}
+    unknown = [
+        p.instance_id
+        for p in list(a_predictions) + list(b_predictions)
+        if p.instance_id not in by_id
+    ]
+    if unknown:
+        raise ValueError(f"predictions reference unknown instances: {unknown[:5]}")
+
+    a_hits = {p.instance_id: top_1_hit(p, by_id[p.instance_id]) for p in a_predictions}
+    b_hits = {p.instance_id: top_1_hit(p, by_id[p.instance_id]) for p in b_predictions}
+
+    if set(a_hits) != set(b_hits):
+        only_a = sorted(set(a_hits) - set(b_hits))[:5]
+        only_b = sorted(set(b_hits) - set(a_hits))[:5]
+        raise ValueError(
+            f"{a} and {b} answered different Instances. "
+            f"only in {a}: {only_a}. only in {b}: {only_b}"
+        )
+    if not a_hits:
+        raise ValueError(f"{a} and {b} share no Instances to compare")
+
+    counts = Counter((a_hits[key], b_hits[key]) for key in a_hits)
+    return PairedComparison(
+        a=a,
+        b=b,
+        n=len(a_hits),
+        both_hit=counts[(True, True)],
+        both_miss=counts[(False, False)],
+        a_only=counts[(True, False)],
+        b_only=counts[(False, True)],
+        p_value=mcnemar_p_value(counts[(True, False)], counts[(False, True)]),
+    )
+
+
+@dataclass(frozen=True)
 class InstanceScore:
     """One prediction scored against one instance."""
 

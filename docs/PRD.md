@@ -48,11 +48,17 @@ The reader of the README is the primary user. This reader is a reviewer. The rev
 
 ## Constraints
 
-`Run` names two different things. This document keeps them apart.
+`Run` named two different things, and it now names three. `CONTEXT.md` defines a **Budget** with one name per scope, and this document uses those names.
 
-**Per localization request**, at rung 4: 25 tool calls and 120 seconds. The live demo serves requests under a rate cap and a hard daily budget. All model calls run server-side.
+**Instance Budget**, one localization request at rung 4: **8 tool calls and 600 seconds**. It carries no dollar cap, because eight capped tool results cannot reach $0.05. The graph state checks it before each dispatch. See [ADR-0009](adr/0009-tool-using-agent.md).
 
-**Per evaluation run**, over a whole split: [ADR-0008](adr/0008-llm-rerank.md) sets the cap. It stands at $2.00 per run and $5.00 per milestone. This supersedes the $0.50 figure this document carried before anyone measured the payload.
+This supersedes the 25 tool calls and 120 seconds this document carried before anyone measured a step. On the pinned route a step takes 4 to 8 seconds and a full reply takes about 44, so a 120-second cap would have fired on ordinary variance and a 25-call cap could never have been reached.
+
+**Evaluation Budget**, one evaluation of a whole split: **$12**. It is checked against spend already incurred, so a run stops rather than report an overspend afterwards.
+
+**Milestone Budget**: **$20** for M5. This supersedes ADR-0008's $2.00 and $5.00, which were set for a rung making one call per Instance.
+
+The live demo serves requests under a rate cap and a hard daily budget. All model calls run server-side.
 
 ## Open questions
 

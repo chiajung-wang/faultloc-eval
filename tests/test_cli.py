@@ -6,7 +6,7 @@ which is the point of keeping them thin.
 
 from __future__ import annotations
 
-from faultloc.cli import _failure_note, _progress_line
+from faultloc.cli import _count, _failure_note, _progress_line
 
 
 class StubEngine:
@@ -72,3 +72,151 @@ class TestCacheNote:
 
     def test_a_fresh_clean_run_says_nothing(self) -> None:
         assert _failure_note(StubEngine(unparseable=0, truncated=0, off_list=0, cache_hits=0)) == ""
+
+
+class TestCount:
+    def test_reads_an_integer_counter(self) -> None:
+        assert _count(StubEngine(off_list=6), "off_list") == 6
+
+    def test_reads_the_length_of_a_list_counter(self) -> None:
+        """Rung 3 counts off-list paths with an integer. Rung 4 keeps the paths,
+        so the entry can show what a hallucinated path looks like. Without this
+        the note would print a Python list into the results log."""
+        assert _count(StubEngine(off_list=["a.py", "b.py"]), "off_list") == 2
+
+    def test_a_missing_counter_is_zero(self) -> None:
+        assert _count(StubEngine(), "off_list") == 0
+
+
+class TestFailureNoteForFreeRungs:
+    def test_a_clean_free_rung_says_nothing(self) -> None:
+        """Rungs 1 and 2 have no counters at all, and their entries must not gain
+        an empty sentence."""
+        assert _failure_note(StubEngine()) == ""
+
+    def test_rung_3_renders_exactly_as_it_did_before(self) -> None:
+        """The regression that matters. Rung 4's disclosures must not change a
+        single character of what rung 3 publishes, or the M4 entries and the M5
+        entries stop being comparable prose."""
+        engine = StubEngine(unparseable=17, truncated=3, off_list=6, cache_hits=244)
+
+        note = _failure_note(engine)
+
+        assert note == (
+            "Degraded: 17 unparseable replies, 3 truncated replies, 6 off-list paths. "
+            "Replayed 244 responses from cache; cost is what they cost to make."
+        )
+
+    def test_a_free_rung_gets_no_guardrail_line(self) -> None:
+        assert "Guardrail" not in _failure_note(StubEngine(unparseable=1))
+
+    def test_a_free_rung_gets_no_tool_call_line(self) -> None:
+        assert "Tool calls" not in _failure_note(StubEngine(unparseable=1))
+
+
+class TestFailureNoteForRungFour:
+    def agent(self, **overrides: object) -> StubEngine:
+        fields: dict = {
+            "unparseable": 2,
+            "truncated": 1,
+            "off_list": ["src/found.py", "src/other.py"],
+            "hallucinated": ["ghost.py"],
+            "guardrail_retries": 1,
+            "recalled": ["src/other.py"],
+            "calls_per_instance": [1, 3, 8, 8],
+            "max_tool_calls": 8,
+        }
+        fields.update(overrides)
+        return StubEngine(**fields)
+
+    def test_an_off_list_path_is_not_filed_as_a_degrade(self) -> None:
+        """It is what rung 4 adds over rung 3. Rung 3 discards such a path; rung 4
+        keeps one that exists. Calling it a degrade would be the exact conflation
+        ADR-0009 corrects."""
+        note = _failure_note(self.agent())
+
+        assert "off-list paths" not in note
+        assert "Off-list accepted: 2" in note
+
+    def test_publishes_the_guardrail_catch_rate(self) -> None:
+        """`CONTEXT.md` promises it."""
+        note = _failure_note(self.agent())
+
+        assert "1 paths rejected as absent at base_commit" in note
+        assert "1 retries" in note
+
+    def test_publishes_tool_reached(self) -> None:
+        """A real path no tool surfaced was recalled from training data rather
+        than found. The Verified Set predates the cutoff."""
+        assert "1 were never surfaced by a tool" in _failure_note(self.agent())
+
+    def test_publishes_the_tool_call_distribution(self) -> None:
+        """ADR-0009's revisit condition. If most Instances reach the cap, the cap
+        produced the number rather than the agent."""
+        note = _failure_note(self.agent())
+
+        assert "median 8" in note
+        assert "cap of 8 reached on 2/4 instances" in note
+
+    def test_still_reports_the_ways_it_kept_its_input_ranking(self) -> None:
+        note = _failure_note(self.agent())
+
+        assert "2 unparseable replies" in note
+        assert "1 truncated replies" in note
+
+    def test_reports_instances_that_had_no_candidates(self) -> None:
+        assert "3 instances with no candidates" in _failure_note(self.agent(no_candidates=3))
+
+    def test_a_clean_agent_run_still_reports_its_tool_calls(self) -> None:
+        """Zero failures is not zero information. The distribution decides whether
+        the cap bound the result."""
+        note = _failure_note(
+            self.agent(
+                unparseable=0,
+                truncated=0,
+                off_list=[],
+                hallucinated=[],
+                guardrail_retries=0,
+                recalled=[],
+            )
+        )
+
+        assert "Degraded" not in note
+        assert "Tool calls: median 8" in note
+
+    def test_the_zero_tool_cell_reports_no_cap(self) -> None:
+        """The Ablation makes no tool calls at all, so a cap line would be noise."""
+        note = _failure_note(self.agent(calls_per_instance=[0, 0], max_tool_calls=0))
+
+        assert "cap of 0 reached on 0/2" in note
+
+    def test_reports_a_tool_the_model_invented(self) -> None:
+        """It costs a step against the Instance Budget, so it cannot be silent."""
+        note = _failure_note(self.agent(unknown_tools=2))
+
+        assert "2 calls to tools that do not exist" in note
+
+    def test_reports_calls_and_top_1_credit_per_tool(self) -> None:
+        """ADR-0002 called five tools "a deliberate ceiling", and ADR-0009 turned
+        the roster into a measurement. A tool that never surfaces a path reaching
+        an answer does not earn its slot."""
+        note = _failure_note(
+            self.agent(
+                calls_by_tool={"read_file": 12, "search_code": 5, "semantic_search": 2},
+                credited_by_tool={"read_file": 3, "search_code": 1},
+            )
+        )
+
+        assert "read_file 12 calls/3 top-1" in note
+        assert "search_code 5 calls/1 top-1" in note
+        assert "semantic_search 2 calls/0 top-1" in note
+
+    def test_orders_the_roster_by_use(self) -> None:
+        note = _failure_note(
+            self.agent(calls_by_tool={"a_rare": 1, "z_common": 9}, credited_by_tool={})
+        )
+
+        assert note.index("z_common") < note.index("a_rare")
+
+    def test_a_free_rung_gets_no_roster_line(self) -> None:
+        assert "Tools:" not in _failure_note(StubEngine(unparseable=1))
