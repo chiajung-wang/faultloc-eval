@@ -26,7 +26,9 @@ The code pins the revision. It never resolves to `main`. A dataset that updates 
 
 **Fresh Set** — self-mined GitHub issues, closed *after* the evaluated model's training cutoff, target 150–300 instances. Mined per M6. The same Instance Filter code path derives its ground truth, so the two numbers stay comparable.
 
-The headline metric is reported on both. The gap between them is the contamination estimate.
+[ADR-0010](0010-fresh-set-mining.md) settles every parameter this ADR left open: the threshold date, the mining criteria, the estimator, and the reweighting that django's absence forces.
+
+The headline metric is reported on both. **This ADR originally called the gap between them the contamination estimate. That is superseded.** A raw gap mixes memory with task difficulty, and the two sets turned out to hold opposite repo mixes. [ADR-0010](0010-fresh-set-mining.md) replaces it with a reweighted difference of two drops.
 
 ## Rationale
 

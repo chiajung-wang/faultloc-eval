@@ -32,6 +32,8 @@ This supports the claim that distinguishes the project: *when the system says 80
 
 **Split discipline is mandatory.** Freeze the dev and test splits before any tuning. Fit the calibrator on dev. Evaluate the test set once. A break in this rule invalidates every calibration number, and it does so silently.
 
+**That single read happens at M6, not M7.** [ADR-0010](0010-fresh-set-mining.md) runs rung 4 across the full Verified Set to buy statistical power for the contamination estimate, and it persists per-instance Predictions. M7 reads that artifact instead of running again. The calibrator sits on top of rung 4 and does not change it, so nothing is tuned against test in between.
+
 - Sampling cost roughly doubles for every rung that uses the agreement feature.
 - The calibrator is itself a model that can be wrong. Report its failure modes as you report any other component's.
 

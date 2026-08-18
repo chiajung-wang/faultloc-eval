@@ -236,11 +236,12 @@ Each decision carries a stated rationale and its rejected alternatives:
 | [ADR-0007](docs/adr/0007-embedding-model.md) | A local embedding model, pinned by revision |
 | [ADR-0008](docs/adr/0008-llm-rerank.md) | Rung 3 reranks with a served open-weights model, and stops claiming determinism |
 | [ADR-0009](docs/adr/0009-tool-using-agent.md) | Rung 4 starts from rung 3's payload and goes looking for what retrieval missed |
+| [ADR-0010](docs/adr/0010-fresh-set-mining.md) | The Fresh Set mines GitHub after 2026-05-01, and contamination is a difference of two drops |
 
 ## Evaluation
 
 - **Verified Set** — SWE-bench Verified, 500 human-validated instances. Published localization numbers exist against it, so results are anchored.
-- **Fresh Set** — self-mined issues closed *after* the evaluated model's training cutoff. The accuracy gap between the two sets measures contamination.
+- **Fresh Set** — self-mined issues whose fix merged *after* the evaluated model's training cutoff. Contamination is rung 4's drop across the two sets **minus** the drop a model-free rung shows on the same pair, because a raw gap mixes memory with task difficulty (ADR-0010).
 - **Filter rate published.** A stated rule drops instances (ADR-0001). The rejection rate and the per-reason counts ship with every result. Unreported filtering makes a benchmark unfalsifiable.
 - **Abstention measured, not asserted.** A calibrated confidence model produces the accuracy-vs-coverage curve. The report includes ECE and a reliability diagram.
 

@@ -18,11 +18,27 @@ Pinned to `princeton-nlp/SWE-bench_Verified`, split `test`, revision `c104f840cc
 
 ## Fresh Set
 
-Self-mined instances whose issues closed *after* the evaluated model's training cutoff. This set is the contamination control. Target size is 150–300. Draw them from the Verified Set's repositories where possible, so that a measured gap reflects contamination rather than repo difficulty. See ADR-0006.
+Self-mined Instances whose fixing pull request merged on or after **2026-05-01**. That date clears the April 2026 training cutoff of `deepseek/deepseek-v4-pro`, which rung 4 pins, with one month of margin. The cutoff is unofficial, so the margin is the whole defense.
+
+This set is the Contamination control. It carries **no dev/test split**, because it is read once and nobody tunes against it. A committed JSON file holds the frozen Instances, and its content hash is the revision that every `RESULTS.md` entry stamps.
+
+**It holds almost no django.** django/django runs its issue tracker on Trac, so GitHub issue linkage finds 1 candidate against django's 231 Instances in the Verified Set. [Mix Reweighting](#mix-reweighting) exists because of that. See ADR-0006.
 
 ## Contamination
 
-The possibility that a model memorized an issue's fix from training data instead of localizing it. The accuracy gap between the Verified Set and the Fresh Set measures it.
+The possibility that a model memorized an issue's fix from training data instead of localizing it.
+
+**The estimate is a difference of two drops.** Take rung 4's accuracy drop from the Verified Set to the Fresh Set. Then subtract the drop that rung 2.5 shows across the same two sets. Rung 2.5 runs no model, so its drop prices task difficulty alone. What remains is the Contamination estimate.
+
+A single rung's drop is not the estimate. It mixes memory with difficulty, and nothing inside it separates the two.
+
+## Mix Reweighting
+
+The rule that makes a Verified number comparable to a Fresh number. Compute the Verified aggregate as a per-repo average, weighted by the **Fresh Set's** repo proportions.
+
+The two sets have opposite shapes. django is 46% of the Verified Set and near zero in the Fresh Set. Post-cutoff activity concentrates in scikit-learn, pytest, astropy, matplotlib and pylint, and those repos hold few Verified Instances each. An unweighted comparison would move the headline by repo mix alone, by more than any Contamination effect anyone expects.
+
+**Reweighting costs power, and every reweighted figure publishes the cost.** Effective sample size on the Verified side falls from 244 to 66 on the dev split, and to 141 across the full set. A larger Fresh Set does not recover it, because the Verified side is the binding constraint.
 
 ## Ground-Truth File Set
 
@@ -33,6 +49,8 @@ Nobody labels it by hand. A reader must be able to regenerate it from the same i
 ## Instance Filter
 
 The rule that decides which raw issue/PR pairs become Instances. It drops non-source files (tests, docs, config, lockfiles) from the Ground-Truth File Set. It then drops the whole instance if more than 3 source files remain.
+
+Two more rules cover raw pull request file lists, which the Fresh Set introduces. The filter drops a file whose basename carries no extension, such as `AUTHORS` or `.mailmap`. It also drops test infrastructure, such as `_testing.py` and `conftest.py`. Both rules change no Verified Instance, and somebody measured that before ADR-0001 accepted them. M6 implements them.
 
 Rationale in [ADR-0001](docs/adr/0001-ground-truth-file-set.md).
 

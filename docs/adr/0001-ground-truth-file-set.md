@@ -1,6 +1,6 @@
 # ADR-0001: Ground truth is source files in the fixing PR, capped at three
 
-**Status:** Accepted · 2026-07-31
+**Status:** Accepted · 2026-07-31 · *amended 2026-08-18: raw pull request file lists put files into the Ground-Truth File Set that the deny-list never anticipated. See the [amendment](#amended-2026-08-18--the-deny-list-met-a-file-with-no-extension).*
 
 ## Context
 
@@ -63,3 +63,36 @@ The rule is still correct and still required. The miner takes Fresh Set instance
 - **All PR files** — the metric would penalize the system when it fails to predict `CHANGELOG.md`
 - **Source files, no cap** — keeps ill-posed refactor instances. Low scores become undiagnosable
 - **Single-file instances only** — cleanest metric, but drops roughly half the data and invites a fair accusation of cherry-picking
+
+## Amended 2026-08-18 — the deny-list met a file with no extension
+
+M6 mines raw pull requests, and this ADR predicted what would happen there. **The prediction holds.** Test-stripping fired on **38 of 56** sampled raw file lists, which is 68%. On the Verified Set it fired zero times, because SWE-bench separates `patch` from `test_patch`. The rule that did no work on the anchor does most of the work on the control.
+
+The same sample surfaced a failure this ADR did not anticipate. Of 42 kept Ground-Truth File Sets, six held a file that no fix could ever live in:
+
+```
+AUTHORS                         x3   (pytest-dev/pytest)
+.mailmap                        x1   (sympy/sympy)
+sklearn/utils/_testing.py       x2   (scikit-learn/scikit-learn)
+```
+
+`AUTHORS` and `.mailmap` carry no extension, so no suffix rule reaches them. `_testing.py` is test infrastructure that sits outside `tests/` and starts with an underscore rather than `test_`, so neither test rule reaches it either.
+
+**The harm is one-sided, which is why it is easy to miss.** A bogus Ground-Truth File cannot be retrieved by anything. It therefore deflates Recall@3 and Recall@5, and it leaves Top-1 untouched, because Top-1 asks only whether the top prediction is *somewhere* in the set. A headline that looks healthy would sit beside a Recall figure that is quietly wrong.
+
+### The two rules
+
+1. Drop a file whose basename holds no extension.
+2. Drop test infrastructure: a basename containing `_testing`, and `conftest.py`.
+
+### Why this does not change any published number
+
+Both rules were run against the Verified Set before they landed. **0 of 490 Instances hold an extensionless or test-infrastructure Ground-Truth File.** The rules are a measured no-op on the anchor and take effect only on the control.
+
+That measurement is the argument. A change to the Instance Filter is a change to what every past number means, so a filter rule that cannot be shown to be inert is a re-run of the whole ladder.
+
+### What stays rejected
+
+**A per-repo source-root allow-list**, keeping only paths under `sklearn/`, `lib/matplotlib/`, `src/_pytest/` and so on. It would also remove `build_tools/get_comment.py` and `xarray/util/generate_aggregations.py`, which the sample shows surviving. It reverses this ADR's deny-list decision, which exists so that `.pyx`, `.c` and `.js` fixes are not dropped in silence, and it adds per-repo configuration that every future repository must extend.
+
+The deny-list still loses to an allow-list on precision. It wins on the failure mode that matters: an over-broad allow-list drops a real Ground-Truth File, and a dropped ground-truth file is indistinguishable from a wrong prediction downstream.
