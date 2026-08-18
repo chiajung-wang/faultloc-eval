@@ -216,6 +216,50 @@ cells sat, which is exactly its Candidate Set hit@20. A cell with no tools shoul
 not pass a retrieval ceiling, so this is worth checking rather than celebrating:
 it may be noise at n=22, or it may mean the ceiling figure needs re-measuring.
 
+## Amended a third time 2026-08-18 — the matched rung-3 baseline is dropped
+
+ADR-0009 named three comparisons. One of them cannot be made, and the reason is a
+change this ADR itself forced.
+
+**What broke it.** The Ablation and the agent both truncated on runaway reasoning:
+replies that spent an entire 16,000-token budget thinking and emitted no answer.
+The fix was to pin rung 4 to `reasoning={"effort": "low"}`, which this route
+honors. That pin is now what the agent runs.
+
+`rerank-deepseek-on` at 79.1% does not have it. M4 ran that cell at the
+provider's default, which is the unbounded setting. So the "attributable delta"
+row is no longer attributable: model and route match, and **reasoning does not**.
+
+**Re-running the baseline was the obvious repair, and it was tried.** It cost 17x
+M4's measured figure -- $0.0346 per Instance against $0.0020 -- because the same
+runaway reasoning appears there too, at a median of 7,119 reasoning tokens. It
+would also have breached rung 3's $2.00 Evaluation Budget at Instance 57 of 244.
+Stopped at Instance 30, no entry written.
+
+**What replaces it is finer, not weaker.** The matched baseline was meant to
+isolate *the loop and the tools together* from rung 3. `agent-no-tools` isolates
+**the tools alone**: same model, same route, same reasoning, same prompt, same
+scaffolding, same answer format, and the only difference is whether tools exist.
+
+| Comparison | Against | Status |
+|---|---|---|
+| **tools delta** | `agent-no-tools`, 84.0% | **paired, one variable. The claim M5 publishes.** |
+| ladder delta | `rerank`, 74.2% | paired, and confounded: model, route and reasoning all differ. Reported with that stated. |
+| deployment delta | `rerank-deepseek-off`, 75.0% at $0.31 | aggregate only, no per-instance Predictions exist |
+| ~~attributable delta~~ | ~~`rerank-deepseek-on`, 79.1%~~ | **dropped. Reasoning no longer matches, and repairing it costs more than the comparison is worth.** |
+
+**What M5 can no longer say.** That rung 4 beats the strongest rung-3 cell with
+only the loop and the tools moving. No published number will claim it.
+
+**What M5 says instead.** What the tools bought over identical scaffolding. Given
+that the Ablation already put the scaffolding at about ten points, a raw rung-3
+delta would have measured mostly something that is not the agent, so the sentence
+that survives is the more useful one.
+
+**The record stays rather than disappear into an edit.** The three-comparison
+table above is left as written, and this amendment sits beside it. A reader should
+be able to see that the design named a comparison it could not afford to keep.
+
 ## Revisit condition
 
 **If most Instances reach the cap of 8 tool calls**, the cap produced the number rather than the agent. The entry reports the distribution of tool-call counts, and that is the condition to raise it.
