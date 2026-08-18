@@ -8,6 +8,29 @@ Top-1 is reported with a 95% Wilson interval. At these sample sizes a small
 difference between two rungs or two repositories is not yet a result, and the
 interval is what says so.
 
+## 2026-08-18 · agent · dev
+
+| Metric | Value |
+|---|---|
+| Top-1 | 88.1% (95% CI 83.5%-91.6%) |
+| Recall@3 | 94.0% |
+| Recall@5 | 94.8% |
+| Instances scored | 244 |
+| Wall clock | 168m 51s |
+| Cost | $5.19 ($0.0213/instance) |
+
+**Per repo** — django 113 @ 90.3% · sympy 36 @ 75.0% · sphinx 22 @ 86.4% · matplotlib 17 @ 88.2% · scikit-learn 16 @ 93.8% · xarray 11 @ 90.9% · astropy 10 @ 100.0% · pytest 10 @ 90.0% · requests 4 @ 75.0% · pylint 4 @ 100.0% · other 1 @ 100.0%
+
+**Stop conditions** — answered 243, budget_exceeded 1
+
+**Provenance**
+- code `4c77f49` · dataset `princeton-nlp/SWE-bench_Verified` @ `c104f84` · split `dev` (seed 20260803)
+- Filter: 500 → 490 kept. Dropped: too_many_source_files 10 (2.0%)
+- Reproduce: `faultloc evaluate --rung agent --split dev`
+- Predictions: `data/predictions/agent-dev-2026-08-18-4c77f49.jsonl`
+
+**Read**: Rung 4, ADR-0009's ladder row: warm start from the union Candidate Set, five read-only tools, 8 tool calls and 600s per Instance, reasoning effort low. Its tools delta against agent-no-tools is the attributable one -- same model, route, reasoning, prompt and answer format, with tools as the only difference. Degraded: 2 unparseable replies, 3 truncated replies. Guardrail: 3 paths rejected as absent at base_commit, 3 retries. Off-list accepted: 2, of which 0 were never surfaced by a tool. Tool calls: median 8, mean 6.3, cap of 8 reached on 141/244 instances. Tools: read_file 811 calls/121 top-1, search_code 618 calls/81 top-1, file_outline 89 calls/39 top-1, find_definition 10 calls/1 top-1, semantic_search 3 calls/0 top-1.
+
 ## 2026-08-17 · agent-no-tools · dev
 
 | Metric | Value |
