@@ -41,3 +41,19 @@ M4 was the first milestone with a bill: $1.95 in published rows against $5.59 on
 Carried into M5 so nobody forgets it: the remaining headroom is retrieval, not ranking. The candidate list holds the answer for 88.9% of instances and the best configuration reaches 79.1%. `sphinx` sits exactly on its own ceiling in all four configurations. An agent whose advantage is *searching harder* aims at the gap that is left; an agent that only reorders does not.
 
 Also carried: rung 3 named 92 files that were never candidates, across the four configurations. That is the first sizing evidence for the Path Guardrail M5 must build, and the rate differs sharply by configuration.
+
+**M5 closed 2026-08-18. Rung 4 is the best row in the ladder, and the tools are not what made it.**
+
+The agent scores **88.1% Top-1 (83.5-91.6)**, above every other row. Its own Ablation, the same agent with the tool-call cap at zero, scores **84.0%**. Same model, route, reasoning, prompt, loop and answer format. The only difference is that the Ablation cannot open a file.
+
+**The tools delta is +4.1pp at p=0.087, and it is not established.** Nineteen Instances won, nine lost, twenty-eight discordant. The delta against rung 3 is +13.9pp and decisively significant, and it is not the agent's achievement: six variables move at once, and the Ablation attributes about ten of those points to the loop and the answer format alone. ADR-0009 declared that Ablation before either cell ran, which is the only reason the two can be told apart.
+
+**Rung 4 reached past the Candidate Set twice in 244 Instances.** That is its one structural advantage over any reranker, and the most direct explanation of the small delta. Both paths were surfaced by a tool rather than recalled from training data.
+
+**Two tools of five carry the work.** `read_file` 811 calls and 121 Top-1 finds, `search_code` 618 and 81, `file_outline` 89 and 39, `find_definition` 10 and 1, and `semantic_search` **3 calls and 0**. ADR-0002 fixed five tools by name, and ADR-0009 named this outcome as the condition for revisiting that.
+
+**The cap binds on 141 of 244 Instances**, median exactly 8, so 88.1% is a lower bound on what this design does with more room.
+
+M5 cost about $11, and one planned comparison was dropped rather than bought: pinning rung 4 to bounded reasoning left M4's unbounded 79.1% cell unmatched, and re-running it cost seventeen times M4's measured figure.
+
+Carried into M6 and M7: the Candidate Set is still the binding constraint. Issue 01 measured the reachable ceiling at 95.5% and rung 4 reached 88.1%, so the gap is retrieval that no amount of tool use recovered. M7's Calibrator also inherits a specific fact from M5 — free rank fusion beats the paid reranker on 6 Instances, so a system that can abstain has something real to work with.

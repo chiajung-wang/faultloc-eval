@@ -6,7 +6,7 @@ Fault localization, built as a *measured ladder*: lexical retrieval, dense retri
 
 The system is half the deliverable. The evidence is the other half: a reproducible benchmark, a published filter rate, a contamination control, and a calibrated confidence model. That model lets the system abstain instead of guess.
 
-> **Status: M4 complete, M5 in design.** An LLM reranking the candidate list scores **75.0% Top-1** on the dev split, against **45.5%** for free rank fusion below it. That is the first gap in this ladder wider than its own confidence interval. Four model configurations spanning an 11.8x price difference land within 6.6 points of each other, so the model choice is not what produced it — the row now published is the cheapest and near-fastest of them, at $0.31 and 22 minutes for the whole split. Rung 4, the agent, is designed and not yet built: [ADR-0009](docs/adr/0009-tool-using-agent.md) declares it, and a free measurement puts its reachable ceiling at about **95.5%**.
+> **Status: M5 complete.** A tool-using agent scores **88.1% Top-1** on the dev split, the highest number in this ladder. Its own ablation — the same agent with **no tools at all** — scores **84.0%**. The gap between them is the only comparison that isolates the tools, and at **+4.1pp, p=0.087, it is not established**. Most of what separates rung 4 from rung 3 is the loop and the answer format, not the searching.
 
 ## Why localization and not patch generation
 
@@ -27,7 +27,8 @@ Dev split, 244 instances. Test set untouched until M7.
 | Hybrid (rung 2.5) | rank fusion | 45.5% (39.4–51.8) | 65.2% | 73.1% | $0.00 | 1.02s |
 | Cross-encoder (rung 2.6) | Evidence Chunk | 26.6% (21.5–32.5) | 42.8% | 52.6% | $0.00 | 15.05s |
 | **LLM rerank (rung 3)** | Evidence Chunk | **75.0%** (69.2–80.0) | **82.8%** | **85.7%** | **$0.0013** | 5.34s |
-| Agent | — | — | — | — | — | — |
+| Agent, no tools (ablation) | Evidence Chunk | 84.0% (78.9–88.1) | 86.7% | 89.3% | $0.0229 | 41.0s |
+| **Agent (rung 4)** | Evidence Chunk + 5 tools | **88.1%** (83.5–91.6) | **94.0%** | **94.8%** | **$0.0213** | 41.5s |
 
 Every number traces to a dataset, split, commit, and date in [`RESULTS.md`](RESULTS.md). The run writes that file. Nobody writes it by hand. Latency is the entry's wall clock divided by 244.
 
@@ -131,6 +132,91 @@ The candidate list holds a ground-truth file in its top 20 for **88.9%** of inst
 The four published rows cost **$1.95**. The account spent **$5.59**. The difference went to abandoned runs and to the search for a provider that could serve the work. One attempt completed nothing at $2.25. Another died at instance 110. The rest went on probes that established the limits. Three providers were rejected on measurement — an undocumented 8,192-token completion cap, an exhausted shared capacity pool, and repeated timeouts.
 
 The first rung with a bill also produced the first rung whose number a reader cannot regenerate from a commit alone. Reproducing it needs an API key and about two dollars.
+
+## M5: the agent is the best row, and the tools are not what made it
+
+**Rung 4 scores 88.1% Top-1 (83.5–91.6)**, above every other row. It is also the
+milestone's least interesting number, because a second cell explains most of it.
+
+`agent-no-tools` is the same agent with the tool-call cap set to zero. Same model,
+same route, same reasoning setting, same warm-start prompt, same loop, same
+`submit_ranking` answer format. The only difference is that it cannot look at a
+single file. **It scores 84.0%.**
+
+ADR-0009 declared that ablation before either cell ran, and it earned its $5.59.
+
+### The two deltas, and only one of them is about tools
+
+| Comparison | Delta | Paired p | What moves |
+|---|---|---|---|
+| **agent vs agent-no-tools** | **+4.1pp** | **0.087** | **tools, and nothing else** |
+| agent vs rung 3 (`rerank`) | +13.9pp | 1.2e-06 | model, route, reasoning, loop, format, tools |
+
+The second is decisive and it is not the agent's achievement. Six things move at
+once, and the ablation already attributes about ten of those points to the loop
+and the answer format alone. Publishing +13.9pp as what an agent buys would be
+the same overclaim M3 caught when a free chunking change nearly took credit that
+a paid embedding model was about to receive.
+
+**So the honest headline is +4.1pp, and the measurement cannot separate it from
+chance.** Nineteen instances won, nine lost, twenty-eight discordant.
+
+### Why the tools bought so little
+
+Rung 4's one structural advantage over any reranker is that it can name a file
+the Candidate Set never contained. That is the only route above the 88.9%
+retrieval ceiling.
+
+**It did so twice in 244 instances.** Both were surfaced by a tool rather than
+recalled, which the Tool-Reached check confirms. Two paths cannot move a Top-1
+number, and that is the most direct explanation of the small delta.
+
+### The roster was measured, and it does not hold up
+
+| Tool | Calls | Instances where it found the Top-1 |
+|---|---|---|
+| `read_file` | 811 | 121 |
+| `search_code` | 618 | 81 |
+| `file_outline` | 89 | 39 |
+| `find_definition` | 10 | 1 |
+| `semantic_search` | **3** | **0** |
+
+`semantic_search` was called three times across 244 instances and never surfaced
+an answer. [ADR-0002](docs/adr/0002-no-code-execution.md) fixed five tools by
+name; ADR-0009 named this exact outcome as the condition for revisiting that, and
+the roster now takes a recorded correction rather than a quiet edit.
+
+`find_definition` at ten calls is close behind. Two tools out of five carry the
+work.
+
+### The cap binds, so part of this number is the cap's
+
+The Instance Budget allows eight tool calls. **The agent reached it on 141 of 244
+instances**, with a median of exactly eight. It is still working when it is cut
+off, so 88.1% is a lower bound on what this design does with more room, and
+ADR-0009's revisit condition has fired.
+
+### What the agent fixed for free
+
+The ablation truncated **58 of 244** replies. The agent truncated **3**. A cell
+with no tools must emit a whole twenty-path ranking in one reply, and one instance
+in four this model could not. An agent spreads the same work across steps.
+
+`sphinx` also moved, from the 63.6% where all four rung-3 cells sat — exactly its
+Candidate Set ceiling — to **86.4%**.
+
+### What M5 cost, and what it could not buy
+
+$11 across three runs and the setup that found four real bugs: a client with no
+request timeout, runaway reasoning that spent an entire 16,000-token budget
+without answering, a timeout inherited from rung 3 that made eight retries take
+two hours, and a `request_timeout` fix that was itself the cause of a later hang.
+
+One planned comparison was dropped. Rung 4 had to be pinned to bounded reasoning
+to stop the runaway, which left M4's unbounded 79.1% cell no longer matched.
+Re-running it cost seventeen times M4's measured figure and would have breached
+rung 3's budget at instance 57. ADR-0009 records the drop and the reason.
+
 
 ## Design
 
