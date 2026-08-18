@@ -1,6 +1,6 @@
 # 06 — Publish the rung-4 delta, the zero-tool ablation, and close M5
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -75,23 +75,23 @@ Update the README's results table and its narrative. Update `docs/milestones.md`
 
 ## Acceptance criteria
 
-- [ ] `rerank-deepseek-on` re-run so the baseline has per-instance Predictions (~$0.49)
-- [ ] Both cells run over the full dev split, and each emits a `RESULTS.md` entry with measured cost
-- [ ] Both entries record the model ID, the revision, the provider tag and the serving precision
-- [ ] Neither run publishes from a dirty tree
-- [ ] The ladder delta and the tools delta are both reported, each with the paired test, and the entry states which licenses which claim
-- [ ] Tool-call distribution and cap-reached rate published, **and the entry states whether the cap bound the result** — both smoke runs reached it on 6 of 6 Instances, median exactly 8, so ADR-0009's revisit condition has fired every time so far
-- [ ] Per-tool contribution decides `semantic_search`'s slot, or says why it cannot — three of five tools recorded zero calls across the three smoke Instances, none of which was a `sphinx` Instance
-- [ ] Path Guardrail catch rate published
-- [ ] Accepted Off-List Paths counted, and the correct share reported
-- [ ] Tool-Reached split reported
-- [ ] Per-tool contribution reported
-- [ ] Stop Condition rates and every counted failure path published
-- [ ] Per-repo results published, `sphinx` included
-- [ ] README figures match the log by string match, not by eye
-- [ ] Spend recorded against the Milestone Budget, with published rows separated from setup
-- [ ] `docs/milestones.md` records what M5 established
-- [ ] A null or negative delta is published as the finding, not held back
+- [ ] ~~`rerank-deepseek-on` re-run so the baseline has per-instance Predictions~~ **DROPPED.** Pinning rung 4 to bounded reasoning left this cell unmatched, and re-running it cost 17x M4's figure. ADR-0009 records the drop. `agent-no-tools` isolates the tools more finely than this cell would have.
+- [x] Both cells run over the full dev split, and each emits a `RESULTS.md` entry with measured cost
+- [x] Both entries record the model ID, the revision, the provider tag and the serving precision
+- [x] Neither run publishes from a dirty tree
+- [x] The ladder delta and the tools delta are both reported, each with the paired test, and the entry states which licenses which claim *(the third, attributable delta, was dropped -- see above)*
+- [x] Tool-call distribution and cap-reached rate published, **and the entry states whether the cap bound the result** — both smoke runs reached it on 6 of 6 Instances, median exactly 8, so ADR-0009's revisit condition has fired every time so far
+- [x] Per-tool contribution decides `semantic_search`'s slot, or says why it cannot — three of five tools recorded zero calls across the three smoke Instances, none of which was a `sphinx` Instance
+- [x] Path Guardrail catch rate published
+- [x] Accepted Off-List Paths counted, and the correct share reported
+- [x] Tool-Reached split reported
+- [x] Per-tool contribution reported
+- [x] Stop Condition rates and every counted failure path published
+- [x] Per-repo results published, `sphinx` included
+- [x] README figures match the log by string match, not by eye
+- [x] Spend recorded against the Milestone Budget, with published rows separated from setup
+- [x] `docs/milestones.md` records what M5 established
+- [x] A null or negative delta is published as the finding, not held back
 
 ## Notes
 
@@ -111,3 +111,49 @@ The four rung-3 cells cost $1.95 in published rows against $5.59 on the account.
 
 - [02 — Persist per-instance predictions, and add the paired test](02-persist-predictions-paired-test.md)
 - [05 — The four remaining tools, each honoring the contract](05-remaining-tools.md)
+
+## Comments
+
+**Closed 2026-08-18.** Three runs, about **$11** against a $20 Milestone Budget. Entries `0567b05` and `578e473`, publication `bae8c88`.
+
+### The result
+
+| Cell | Top-1 | Cost | Wall clock |
+|---|---|---|---|
+| `agent` — the ladder row | **88.1%** (83.5-91.6) | $5.19 | 169m |
+| `agent-no-tools` — the Ablation | 84.0% (78.9-88.1) | $5.59 | 167m |
+| rung 3, `rerank` | 74.2% (68.3-79.3) | $0.39 | 186m |
+
+**The tools delta is +4.1pp at p=0.087, and it is not established.** Nineteen Instances won, nine lost, twenty-eight discordant. That is the only comparison that isolates the tools, and it is what M5 publishes.
+
+The ladder delta against rung 3 is +13.9pp at p=1.2e-06 and is **not** the agent's achievement. Six variables move at once, and the Ablation attributes about ten of those points to the loop and the answer format.
+
+### The Ablation paid for itself, and it was declared first
+
+ADR-0009 named it before either cell ran. Without it, M5 would have published +13.9pp as what an agent buys. This is the second time in this project an Ablation stopped a paid system from taking credit for something else: M3's chunking ablation was the first.
+
+### Why the tools bought so little
+
+**Rung 4 reached past the Candidate Set twice in 244 Instances.** That is its only structural advantage over a reranker, and the most direct explanation of the small delta. Both paths were surfaced by a tool rather than recalled, which Tool-Reached confirms.
+
+Issue 01 measured the reachable ceiling at 95.5% and rung 4 reached 88.1%, so the gap that remains is retrieval, which no amount of tool use recovered.
+
+### Two of five tools carry the work
+
+`read_file` 811 calls and 121 Top-1 finds, `search_code` 618 and 81, `file_outline` 89 and 39, `find_definition` 10 and 1, `semantic_search` **3 calls and 0**. ADR-0002 takes a recorded correction.
+
+### The cap binds
+
+141 of 244 Instances reached the eight-call cap, median exactly 8. ADR-0009's revisit condition has fired, and 88.1% is a lower bound on what this design does with more room.
+
+### What went wrong, and what it cost
+
+Four real bugs, all found by running rather than by tests: a client with no request timeout, runaway reasoning that spent an entire 16,000-token budget without answering, a 900s timeout inherited from rung 3 that made eight retries take two hours, and a `request_timeout` fix that was itself the cause of a later hang.
+
+Two claims I made and had to withdraw. I called a stalled run "progressing" from one signal, a cache that was growing from a different process. And I said the provider was down after four consecutive hangs, when a raw request to the same endpoint answered in 1.7 seconds — the fault was mine, in the parameter I had added two commits earlier.
+
+One planned comparison was dropped rather than bought. Pinning rung 4 to bounded reasoning left M4's unbounded 79.1% cell unmatched, and re-running it cost 17x M4's measured figure and would have breached rung 3's $2.00 cap at Instance 57.
+
+### What the free-replay property was worth
+
+A run stopped at Instance 130 on an out-of-credit 402. Resuming replayed 162 Instances for **$0.00** and paid only for the remainder. That is why the response cache keys on the whole transcript and the tool surface, and why this project kept its own cache rather than the framework's.
